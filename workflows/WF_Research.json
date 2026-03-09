@@ -1,0 +1,201 @@
+{
+  "id": "NbYRm4o71mJb4oVF",
+  "name": "WF_Research",
+  "nodes": [
+    {
+      "id": "1c31483a-68ac-42b6-b8aa-10f1b24418ac",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "2e34226a-d561-404b-a1d3-eb8e0f61464d",
+      "name": "Search API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.TAVILY_API_URL || \"https://api.tavily.com/search\"}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{$env.TAVILY_API_KEY ? `Bearer ${$env.TAVILY_API_KEY}` : \"\"}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { query: $json.topic, max_results: 8, include_answer: false, search_depth: \"advanced\" } }}",
+        "options": {
+          "timeout": 45000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "1a50867c-1a3c-4d03-9f82-50c22a68bc95",
+      "name": "Research Synthesizer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.OPENAI_API_URL || \"https://api.openai.com/v1/chat/completions\"}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{`Bearer ${$env.OPENAI_API_KEY || \"\"}`}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  model: $env.OPENAI_MODEL || 'gpt-4o-mini',\n  temperature: 0.2,\n  response_format: { type: 'json_object' },\n  messages: [\n    {\n      role: 'system',\n      content: 'You are ResearchAgent. Return ONLY JSON: {\"research\":{\"notes\":[\"string\"],\"sources\":[{\"title\":\"string\",\"url\":\"string\",\"snippet\":\"string\"}],\"citations\":[\"string\"],\"gaps\":[\"string\"],\"confidence\":\"high|medium|low\"}}'\n    },\n    {\n      role: 'user',\n      content: JSON.stringify({\n        topic: $items('Execute Workflow Trigger', 0, 0)[0].json.topic,\n        search_results: $json,\n      })\n    }\n  ]\n} }",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "f511cd70-fc37-49e5-8805-da275294bff7",
+      "name": "Merge Research Into State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const state = $items('Execute Workflow Trigger', 0, 0)[0].json;\n\nlet parsed;\ntry {\n  const content = $json.choices?.[0]?.message?.content ?? '{}';\n  parsed = typeof content === 'string' ? JSON.parse(content) : content;\n} catch (error) {\n  parsed = {\n    research: {\n      notes: ['Research synthesis parser fallback triggered.'],\n      sources: [],\n      citations: [],\n      gaps: ['AI parser fallback: inspect Search API response manually.'],\n      confidence: 'low',\n    },\n  };\n}\n\nconst research = parsed.research ?? {};\nconst merged = {\n  ...state,\n  status: 'researched',\n  research: {\n    notes: Array.isArray(research.notes) ? research.notes : [],\n    sources: Array.isArray(research.sources) ? research.sources : [],\n    citations: Array.isArray(research.citations) ? research.citations : [],\n    gaps: Array.isArray(research.gaps) ? research.gaps : [],\n    confidence: research.confidence ?? 'low',\n  },\n};\nmerged.timestamps = {\n  ...(merged.timestamps ?? {}),\n  updated_at: new Date().toISOString(),\n};\n\nreturn [{ json: merged }];"
+      }
+    },
+    {
+      "id": "c00df447-a3fc-4787-9de4-f5d7e97ada04",
+      "name": "Persist Research",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        960,
+        -120
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO content_runs (run_id, status, topic, idempotency_key, state, updated_at)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.status}}',\n  '{{$json.topic}}',\n  '{{ $json.idempotency_key || \"\" }}',\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (run_id)\nDO UPDATE SET\n  status = EXCLUDED.status,\n  topic = EXCLUDED.topic,\n  idempotency_key = EXCLUDED.idempotency_key,\n  state = EXCLUDED.state,\n  updated_at = NOW();",
+        "options": {}
+      },
+      "continueOnFail": true,
+      "credentials": {
+        "postgres": {
+          "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+          "name": "Local Postgres (n8n)"
+        }
+      }
+    },
+    {
+      "id": "ee83288f-cd3e-4331-8938-0335c61f1b62",
+      "name": "Return Researched State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        40
+      ],
+      "parameters": {
+        "jsCode": "return items;"
+      }
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Search API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search API": {
+      "main": [
+        [
+          {
+            "node": "Research Synthesizer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research Synthesizer": {
+      "main": [
+        [
+          {
+            "node": "Merge Research Into State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Research Into State": {
+      "main": [
+        [
+          {
+            "node": "Persist Research",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Return Researched State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "timezone": "UTC"
+  },
+  "staticData": null,
+  "pinData": {},
+  "active": false,
+  "tags": [],
+  "versionId": "a2da3bdb-d622-46b4-9b00-e6195d511836",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "generatedAt": "2026-03-09T04:14:51.808Z"
+  }
+}
