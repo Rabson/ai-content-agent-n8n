@@ -1,54 +1,41 @@
-# Verification Summary
+# Summary
 
 Date: 2026-03-09
 
-## Scope checked
+## Change made
 
-- Main orchestrator + sub-workflows under `workflows/`
-- Workflow generator under `scripts/generate-workflows.mjs`
-- Runtime stack/ops files (`infra/`, `.env`, `Makefile`)
+Updated the project to a **single workflow for a single user** with the requested topic pipeline.
 
-## Requirement verification
+## Current mode
 
-| Requirement                 | Status | Evidence                                                                                     |
-| --------------------------- | ------ | -------------------------------------------------------------------------------------------- |
-| Manager / Supervisor logic  | Pass   | `WF_Content_Orchestrator` uses `Supervisor Decision` + `Route Action`                        |
-| Agent handoff between steps | Pass   | `Execute Workflow` nodes: Research -> Writing -> Review -> Approval -> Publish               |
-| Human-in-the-loop approval  | Pass   | `WF_Approval` supports Slack, Email, Webhook/Form + callback workflow                        |
-| Guardrails (input + output) | Pass   | `Input Rule Guardrail`, `Input AI Guardrail`, `Output Rule Guardrail`, `Output AI Guardrail` |
-| Tool usage                  | Pass   | HTTP Request (LLM/search/publish/notify), Postgres (state/log), webhook integrations         |
-| Persistent state            | Pass   | `content_runs` upserts at each stage, `content_events` logging workflows                     |
-| Workflow orchestration      | Pass   | `WF_Content_Orchestrator` routes state using `If`/`Switch`/`Code`                            |
-| Publishing step             | Pass   | `WF_Publish` routes to Dev.to / Hashnode / Ghost                                             |
+- Active design target: one workflow (`WF_Content_Orchestrator`)
+- Bundle file now intended to carry one workflow for import
+- Inline steps include:
+  - topic discovery (manual or third-party API)
+  - filtering & scoring
+  - topic research
+  - topic review
+  - publish to Dev.to
+  - publish to Medium
+  - generate LinkedIn summary
 
-## Data contract verification
+## New generator
 
-`Init Run State` includes required keys:
+- Added: `scripts/generate-single-user-workflow.mjs`
+- Added Make target: `make generate-single-user-workflow`
 
-- `title`
-- `topic`
-- `summary`
-- `research` (notes/sources/citations/gaps/confidence)
-- `sections`
-- `markdown_content`
-- `review` (feedback/quality/policy/hallucination)
-- `approval`
-- `publish`
-- `timestamps`
-- `run_id`
+## Dashboard added
 
-## Fixes applied during verification
+- Added local dashboard service (`dashboard/`) with:
+  - run status overview
+  - analytics (status mix + daily trend)
+  - control actions (trigger run, retry last failed)
+- Wired into Docker Compose on `http://localhost:3012`
+- Added Make helpers:
+  - `make dashboard-health`
+  - `make dashboard-logs`
 
-- Corrected escaped regex handling in generator and regenerated workflow exports:
-  - `topic.replace(/\\s+/g, ' ')`
-  - heading/word-count/intro regex checks in output guardrail
-- Files updated:
-  - `scripts/generate-workflows.mjs`
-  - `workflows/WF_Content_Orchestrator.json`
-  - `workflows/bundle.workflows.json`
+## Notes
 
-## Operational note
-
-- `n8nio/n8n:2.11.1` is configured in `.env`.
-- On older Docker engines (`20.10.x`), pull may fail with `archive/tar: invalid tar header`.
-- Use `make n8n-up-compat` temporarily (`n8nio/n8n:1.60.1`) until Docker Desktop is upgraded.
+- Postgres credential binding is still required for Postgres nodes.
+- On n8n 2.11.x, workflows must be published after import for production webhook registration.
