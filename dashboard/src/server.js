@@ -11,12 +11,20 @@ const CONTROL_TOKEN = (process.env.DASHBOARD_CONTROL_TOKEN || '').trim();
 const N8N_WEBHOOK_URL = process.env.DASHBOARD_WEBHOOK_URL || 'http://n8n:5678/webhook/content-topic-intake';
 const RECENT_RUN_LIMIT = Number(process.env.DASHBOARD_RECENT_RUN_LIMIT || 30);
 
+function isTruthy(value) {
+  return ['1', 'true', 'yes', 'on', 'require'].includes((value || '').toString().trim().toLowerCase());
+}
+
+const sslEnabled = isTruthy(process.env.POSTGRES_SSL);
+const sslRejectUnauthorized = isTruthy(process.env.POSTGRES_SSL_REJECT_UNAUTHORIZED);
+
 const pool = new Pool({
-  host: process.env.DB_POSTGRESDB_HOST || process.env.PGHOST || 'postgres',
-  port: Number(process.env.DB_POSTGRESDB_PORT || process.env.PGPORT || 5432),
-  database: process.env.DB_POSTGRESDB_DATABASE || process.env.PGDATABASE || 'n8n',
-  user: process.env.DB_POSTGRESDB_USER || process.env.PGUSER || 'n8n',
-  password: process.env.DB_POSTGRESDB_PASSWORD || process.env.PGPASSWORD || 'n8npass',
+  host: process.env.POSTGRES_HOST || 'postgres',
+  port: Number(process.env.POSTGRES_PORT || 5432),
+  database: process.env.POSTGRES_DB || process.env.POSTGRES_DATABASE || 'n8n',
+  user: process.env.POSTGRES_USER || 'n8n',
+  password: process.env.POSTGRES_PASSWORD || 'n8npass',
+  ssl: sslEnabled ? { rejectUnauthorized: sslRejectUnauthorized } : false,
   max: 10,
   idleTimeoutMillis: 20_000,
   connectionTimeoutMillis: 10_000,
