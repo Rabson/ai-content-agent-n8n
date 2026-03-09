@@ -1,0 +1,441 @@
+{
+  "id": "OffiJWXlGPfaHCyM",
+  "name": "WF_Approval",
+  "nodes": [
+    {
+      "id": "0bb0c6f8-fb43-4ded-a847-15a05f6dae52",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "2fe9f661-ed38-4f37-bbe7-684b24fcb91a",
+      "name": "Generate approval token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const state = { ...$json };\nconst token = ($env.APPROVAL_SHARED_SECRET ?? Math.random().toString(36).slice(2, 12)).toString();\nconst callbackBase = ($env.APPROVAL_CALLBACK_URL ?? 'https://your-n8n-instance/webhook/content-approval-callback').toString();\n\nstate.approval = {\n  ...(state.approval ?? {}),\n  status: state.approval?.status && state.approval.status !== 'not_requested' ? state.approval.status : 'pending',\n  token,\n  callback_url: callbackBase,\n  requested_at: new Date().toISOString(),\n};\nstate.status = state.approval.status === 'approved' ? 'approved_for_publish' : 'awaiting_approval';\nstate.timestamps = {\n  ...(state.timestamps ?? {}),\n  updated_at: new Date().toISOString(),\n};\n\nreturn [{ json: state }];"
+      }
+    },
+    {
+      "id": "a6e40215-90ba-49cc-ac65-a57a9c1ca247",
+      "name": "Persist pending approval",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        480,
+        -120
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO content_runs (run_id, status, topic, idempotency_key, state, updated_at)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.status}}',\n  '{{$json.topic}}',\n  '{{ $json.idempotency_key || \"\" }}',\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (run_id)\nDO UPDATE SET\n  status = EXCLUDED.status,\n  topic = EXCLUDED.topic,\n  idempotency_key = EXCLUDED.idempotency_key,\n  state = EXCLUDED.state,\n  updated_at = NOW();",
+        "options": {}
+      },
+      "continueOnFail": true,
+      "credentials": {
+        "postgres": {
+          "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+          "name": "Local Postgres (n8n)"
+        }
+      }
+    },
+    {
+      "id": "5eb3b1c3-038e-4472-a104-573c8094c538",
+      "name": "Approval Channel",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        480,
+        40
+      ],
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{$json.approval.channel || \"slack\"}}",
+        "rules": {
+          "rules": [
+            {
+              "operation": "equal",
+              "value2": "slack",
+              "outputKey": "0"
+            },
+            {
+              "operation": "equal",
+              "value2": "email",
+              "outputKey": "1"
+            },
+            {
+              "operation": "equal",
+              "value2": "webhook",
+              "outputKey": "2"
+            }
+          ]
+        },
+        "mode": "rules",
+        "options": {
+          "fallbackOutput": 0
+        }
+      }
+    },
+    {
+      "id": "d6bfdc2b-a66b-40c7-943a-6eba40e1713a",
+      "name": "Send Slack Approval",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SLACK_APPROVAL_WEBHOOK_URL || \"https://example.com/slack-webhook\"}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { text: `Approval required for run ${$json.run_id}: ${$json.title || $json.topic}`, attachments: [{ text: `Approve: ${$json.approval.callback_url}?run_id=${$json.run_id}&decision=approve&token=${$json.approval.token}` }, { text: `Reject: ${$json.approval.callback_url}?run_id=${$json.run_id}&decision=reject&token=${$json.approval.token}` }] } }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "dcb25fb8-5fef-44ae-b77d-90d874cacf39",
+      "name": "Send Email Approval",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.EMAIL_API_URL || \"https://example.com/send-email\"}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { to: $env.APPROVER_EMAIL || \"editor@example.com\", subject: `Approval needed: ${$json.title || $json.topic}`, html: `<p>Run: ${$json.run_id}</p><p><a href=\"${$json.approval.callback_url}?run_id=${$json.run_id}&decision=approve&token=${$json.approval.token}\">Approve</a></p><p><a href=\"${$json.approval.callback_url}?run_id=${$json.run_id}&decision=reject&token=${$json.approval.token}\">Reject</a></p>` } }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "cbf4e929-45db-4fe5-9b15-ffaca610ff0e",
+      "name": "Send Webhook/Form Approval",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.APPROVAL_FORM_DISPATCH_URL || \"https://example.com/approval-form-dispatch\"}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { run_id: $json.run_id, title: $json.title || $json.topic, summary: $json.summary, callback_url: $json.approval.callback_url, token: $json.approval.token } }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "7c9c7d76-8018-4230-a3d3-ebdea291c336",
+      "name": "Wait 5m",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 5,
+        "unit": "minutes"
+      }
+    },
+    {
+      "id": "f88ccee6-5a67-4050-b58a-901e9415a7ed",
+      "name": "Read approval state",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT state FROM content_runs WHERE run_id = '{{$json.run_id}}' LIMIT 1;",
+        "options": {}
+      },
+      "continueOnFail": true,
+      "credentials": {
+        "postgres": {
+          "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+          "name": "Local Postgres (n8n)"
+        }
+      }
+    },
+    {
+      "id": "45cd09f0-daf3-4545-982f-c90c1ddecb42",
+      "name": "Approval State Mapper",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const original = $items('Generate approval token', 0, 0)[0].json;\nlet state = null;\n\nif (Array.isArray($json) && $json.length > 0 && $json[0].state) {\n  state = $json[0].state;\n} else if ($json.state) {\n  state = $json.state;\n}\n\nif (typeof state === 'string') {\n  try {\n    state = JSON.parse(state);\n  } catch (error) {\n    state = null;\n  }\n}\n\nconst merged = state && typeof state === 'object'\n  ? { ...original, ...state, approval: { ...(original.approval ?? {}), ...(state.approval ?? {}) } }\n  : { ...original };\n\nmerged.approval = {\n  ...(merged.approval ?? {}),\n  status: merged.approval?.status ?? 'pending',\n};\n\nmerged.timestamps = {\n  ...(merged.timestamps ?? {}),\n  updated_at: new Date().toISOString(),\n};\n\nreturn [{ json: merged }];"
+      }
+    },
+    {
+      "id": "a50067b9-9e7c-40b4-b513-c856952c3f41",
+      "name": "Approved or Rejected?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{$json.approval.status}}",
+        "rules": {
+          "rules": [
+            {
+              "operation": "equal",
+              "value2": "approved",
+              "outputKey": "0"
+            },
+            {
+              "operation": "equal",
+              "value2": "rejected",
+              "outputKey": "1"
+            },
+            {
+              "operation": "equal",
+              "value2": "pending",
+              "outputKey": "2"
+            }
+          ]
+        },
+        "mode": "rules",
+        "options": {
+          "fallbackOutput": 2
+        }
+      }
+    },
+    {
+      "id": "beea8612-04fb-40a6-94da-ce517d8e4631",
+      "name": "Return Approval State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        -80
+      ],
+      "parameters": {
+        "jsCode": "const out = { ...$json };\nout.status = out.approval?.status === 'approved' ? 'approved_for_publish' : (out.approval?.status === 'rejected' ? 'approval_rejected' : 'awaiting_approval');\nout.timestamps = {\n  ...(out.timestamps ?? {}),\n  updated_at: new Date().toISOString(),\n};\nreturn [{ json: out }];"
+      }
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Generate approval token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate approval token": {
+      "main": [
+        [
+          {
+            "node": "Persist pending approval",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Approval Channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approval Channel": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Approval",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Email Approval",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Webhook/Form Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Slack Approval": {
+      "main": [
+        [
+          {
+            "node": "Wait 5m",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email Approval": {
+      "main": [
+        [
+          {
+            "node": "Wait 5m",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Webhook/Form Approval": {
+      "main": [
+        [
+          {
+            "node": "Wait 5m",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 5m": {
+      "main": [
+        [
+          {
+            "node": "Read approval state",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read approval state": {
+      "main": [
+        [
+          {
+            "node": "Approval State Mapper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approval State Mapper": {
+      "main": [
+        [
+          {
+            "node": "Approved or Rejected?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved or Rejected?": {
+      "main": [
+        [
+          {
+            "node": "Return Approval State",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Approval State",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 5m",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "timezone": "UTC"
+  },
+  "staticData": null,
+  "pinData": {},
+  "active": false,
+  "tags": [],
+  "versionId": "3431fe6c-9a60-490e-8738-b5405b519ac8",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "generatedAt": "2026-03-09T04:14:51.808Z"
+  }
+}

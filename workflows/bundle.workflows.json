@@ -1,0 +1,2520 @@
+[
+  {
+    "id": "Xlc6ZFLdozHji7p7",
+    "name": "WF_Content_Orchestrator",
+    "nodes": [
+      {
+        "id": "be20866f-d15b-442b-91ce-bcafd32b4d58",
+        "name": "Topic Intake",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "content-topic-intake",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "webhookId": "88bf14bf-ff43-4c36-bef5-8ac17d88bbb0"
+      },
+      {
+        "id": "2de9dda8-b2c0-4507-b13a-7f7af7027aaf",
+        "name": "Normalize Input",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          240,
+          0
+        ],
+        "parameters": {
+          "jsCode": "const payload = $json.body ?? $json;\nconst topic = (payload.topic ?? '').toString().trim();\nconst platform = (payload.platform ?? 'devto').toString().toLowerCase();\nconst requester = (payload.requester ?? 'anonymous').toString();\nconst source = (payload.source ?? 'api').toString();\n\nif (!topic) {\n  return [{\n    json: {\n      topic: '',\n      requester,\n      platform,\n      source,\n      idempotency_key: payload.idempotency_key ?? '',\n      status: 'rejected_input',\n      input_guardrail: {\n        allow: false,\n        rules: {\n          allow: false,\n          blocked_terms: ['missing_topic'],\n          reason: 'Topic is required.',\n        },\n        ai: {\n          allow: false,\n          categories: ['invalid_input'],\n          reason: 'Topic is required.',\n          confidence: 1,\n        },\n      },\n      response: {\n        status: 'rejected_input',\n        message: 'Topic is required.',\n      },\n    },\n  }];\n}\n\nconst normalizedTopic = topic.replace(/\\s+/g, ' ').trim();\nconst slugBase = normalizedTopic.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);\nconst idempotencyKey = (payload.idempotency_key ?? (slugBase + '-' + Date.now())).toString();\n\nreturn [{\n  json: {\n    topic: normalizedTopic,\n    requester,\n    platform,\n    source,\n    idempotency_key: idempotencyKey,\n  },\n}];"
+        }
+      },
+      {
+        "id": "1cf7eca7-dee3-4515-9e33-959d58b5edf6",
+        "name": "Init Run State",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          480,
+          0
+        ],
+        "parameters": {
+          "jsCode": "const now = new Date().toISOString();\nconst random = Math.random().toString(36).slice(2, 10);\nconst runId = Date.now() + '-' + random;\n\nreturn [{\n  json: {\n    run_id: runId,\n    status: $json.status ?? 'received',\n    topic: $json.topic,\n    title: '',\n    summary: '',\n    requester: $json.requester,\n    source: $json.source,\n    platform: $json.platform,\n    idempotency_key: $json.idempotency_key,\n    research: {\n      notes: [],\n      sources: [],\n      citations: [],\n      gaps: [],\n      confidence: 'unknown',\n    },\n    sections: [],\n    markdown_content: '',\n    review: {\n      quality_score: 0,\n      strengths: [],\n      feedback: [],\n      missing_sections: [],\n      policy_violations: [],\n      hallucination_risk: 'unknown',\n      recommended_action: 'revise',\n    },\n    approval: {\n      status: 'not_requested',\n      approver: '',\n      channel: 'slack',\n      comments: '',\n      decided_at: '',\n      token: '',\n      callback_url: '',\n    },\n    publish: {\n      status: 'not_started',\n      platform: $json.platform,\n      url: '',\n      article_id: '',\n      published_at: '',\n      provider_response: {},\n    },\n    input_guardrail: {\n      allow: true,\n      rules: null,\n      ai: null,\n    },\n    output_guardrail: {\n      guardrail_pass: false,\n      violations: [],\n      risk_level: 'unknown',\n      hallucination_risk: 'unknown',\n      missing_required_sections: [],\n      action: 'revise',\n    },\n    supervisor: {\n      next_action: 'RUN_RESEARCH',\n      reason: 'Initial state',\n      required_updates: [],\n      priority: 'normal',\n      retryable: true,\n      decided_at: now,\n    },\n    revision_count: 0,\n    max_revision_attempts: 2,\n    cost_metrics: {\n      prompt_tokens: 0,\n      completion_tokens: 0,\n      estimated_usd: 0,\n    },\n    timestamps: {\n      created_at: now,\n      updated_at: now,\n      started_at: now,\n      finished_at: '',\n    },\n  },\n}];"
+        }
+      },
+      {
+        "id": "2ed602ed-b5c7-4fcf-acb0-3796f7a4c760",
+        "name": "Persist Run Created",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          720,
+          -120
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO content_runs (run_id, status, topic, idempotency_key, state, updated_at)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.status}}',\n  '{{$json.topic}}',\n  '{{ $json.idempotency_key || \"\" }}',\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (run_id)\nDO UPDATE SET\n  status = EXCLUDED.status,\n  topic = EXCLUDED.topic,\n  idempotency_key = EXCLUDED.idempotency_key,\n  state = EXCLUDED.state,\n  updated_at = NOW();",
+          "options": {}
+        },
+        "continueOnFail": true,
+        "notes": "Configure Postgres credentials before production use.",
+        "notesInFlow": true,
+        "credentials": {
+          "postgres": {
+            "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+            "name": "Local Postgres (n8n)"
+          }
+        }
+      },
+      {
+        "id": "da6e6edb-eb34-4078-8554-8ae538173346",
+        "name": "Input Rule Guardrail",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          720,
+          40
+        ],
+        "parameters": {
+          "jsCode": "const topic = ($json.topic ?? '').toLowerCase();\nconst blockedPatterns = [\n  { key: 'malware_generation', re: /\\b(malware|ransomware|keylogger|botnet|trojan builder)\\b/ },\n  { key: 'illegal_hacking', re: /\\b(exploit zero day|bypass firewall|credential stuffing|phishing kit|sql injection payload)\\b/ },\n  { key: 'fake_medical_advice', re: /\\b(fake medical|fabricate diagnosis|unsafe dosage|pretend doctor advice)\\b/ },\n  { key: 'plagiarism_request', re: /\\b(plagiarize|copy exact article|rewrite this to avoid plagiarism checker)\\b/ },\n];\n\nconst hits = blockedPatterns.filter((p) => p.re.test(topic)).map((p) => p.key);\nconst allow = hits.length === 0;\n\n$json.input_guardrail = {\n  ...($json.input_guardrail ?? {}),\n  rules: {\n    allow,\n    blocked_terms: hits,\n    reason: allow ? 'No blocked input patterns detected.' : 'Blocked by deterministic input rules.',\n  },\n};\n\nif (!allow) {\n  $json.status = 'rejected_input';\n}\n$json.timestamps.updated_at = new Date().toISOString();\n\nreturn [{ json: $json }];"
+        }
+      },
+      {
+        "id": "1dc403d8-172a-4482-b984-393d66b5f906",
+        "name": "Input AI Guardrail",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          960,
+          40
+        ],
+        "parameters": {
+          "jsCode": "const topic = ($json.topic ?? '').toLowerCase();\nlet allow = true;\nlet reason = 'No high-risk intent detected.';\nconst categories = [];\nlet confidence = 0.82;\n\nif (/\\b(generate exploit|undetectable malware|steal credentials|bank account takeover)\\b/.test(topic)) {\n  allow = false;\n  categories.push('cyber_abuse');\n  reason = 'High-risk cyber abuse intent detected.';\n  confidence = 0.98;\n}\nif (/\\b(prescribe medication without doctor|fake medical treatment)\\b/.test(topic)) {\n  allow = false;\n  categories.push('unsafe_medical');\n  reason = 'Unsafe medical request detected.';\n  confidence = 0.95;\n}\nif (/\\b(copy this article exactly|pass ai detector plagiarism)\\b/.test(topic)) {\n  allow = false;\n  categories.push('plagiarism');\n  reason = 'Plagiarism-like intent detected.';\n  confidence = 0.94;\n}\n\nconst ruleAllow = $json.input_guardrail?.rules?.allow ?? true;\n\n$json.input_guardrail = {\n  ...($json.input_guardrail ?? {}),\n  allow: Boolean(ruleAllow && allow),\n  ai: {\n    allow,\n    categories,\n    reason,\n    confidence,\n  },\n};\n\nif (!$json.input_guardrail.allow) {\n  $json.status = 'rejected_input';\n  $json.response = {\n    status: 'rejected_input',\n    run_id: $json.run_id,\n    message: 'Topic blocked by guardrails.',\n    categories: [\n      ...($json.input_guardrail.rules?.blocked_terms ?? []),\n      ...($json.input_guardrail.ai?.categories ?? []),\n    ],\n  };\n}\n\n$json.timestamps.updated_at = new Date().toISOString();\nreturn [{ json: $json }];"
+        }
+      },
+      {
+        "id": "5739724d-7a83-4d38-8ca5-d2f5aaedc6e7",
+        "name": "Input Allowed?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 1,
+        "position": [
+          1200,
+          40
+        ],
+        "parameters": {
+          "conditions": {
+            "boolean": [
+              {
+                "value1": "={{$json.input_guardrail.allow}}",
+                "value2": true,
+                "operation": "equal"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "3866b8be-1547-4c7a-9a44-737744f3c0af",
+        "name": "Supervisor Decision",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1440,
+          40
+        ],
+        "parameters": {
+          "jsCode": "const review = $json.review ?? {};\nconst approval = $json.approval ?? {};\nconst publish = $json.publish ?? {};\n\nlet nextAction = 'RUN_RESEARCH';\nlet reason = 'Research notes missing.';\n\nif ($json.input_guardrail?.allow === false || String($json.status || '').startsWith('rejected')) {\n  nextAction = 'REJECT_TOPIC';\n  reason = 'Input guardrail failed.';\n} else if (!Array.isArray($json.research?.notes) || $json.research.notes.length === 0) {\n  nextAction = 'RUN_RESEARCH';\n  reason = 'Research is required before writing.';\n} else if (!$json.markdown_content || !$json.markdown_content.trim()) {\n  nextAction = 'RUN_WRITING';\n  reason = 'Draft content missing.';\n} else if (!review.quality_score) {\n  nextAction = 'RUN_REVIEW';\n  reason = 'Draft not reviewed yet.';\n} else if (\n  (review.quality_score ?? 0) < 80 ||\n  (review.policy_violations ?? []).length > 0 ||\n  review.hallucination_risk === 'high' ||\n  $json.output_guardrail?.guardrail_pass === false\n) {\n  if (($json.revision_count ?? 0) >= ($json.max_revision_attempts ?? 2)) {\n    nextAction = 'END_FAILED';\n    reason = 'Max revision attempts reached.';\n  } else {\n    nextAction = 'REQUEST_REVISION';\n    reason = 'Quality or policy checks require revision.';\n  }\n} else if (approval.status === 'approved' && publish.status !== 'published') {\n  nextAction = 'PUBLISH';\n  reason = 'Approved for publishing.';\n} else if (approval.status === 'rejected') {\n  nextAction = 'END_REJECTED';\n  reason = 'Human approval rejected the content.';\n} else if (publish.status === 'published') {\n  nextAction = 'END_SUCCESS';\n  reason = 'Publishing complete.';\n} else {\n  nextAction = 'SEND_HUMAN_APPROVAL';\n  reason = 'Awaiting human approval.';\n}\n\n$json.supervisor = {\n  next_action: nextAction,\n  reason,\n  required_updates: [],\n  priority: 'normal',\n  retryable: true,\n  decided_at: new Date().toISOString(),\n};\n\n$json.timestamps.updated_at = new Date().toISOString();\nreturn [{ json: $json }];"
+        }
+      },
+      {
+        "id": "0ed25621-d9be-4201-a18e-611f56686690",
+        "name": "Route Action",
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 2,
+        "position": [
+          1680,
+          40
+        ],
+        "parameters": {
+          "dataType": "string",
+          "value1": "={{$json.supervisor.next_action}}",
+          "rules": {
+            "rules": [
+              {
+                "operation": "equal",
+                "value2": "RUN_RESEARCH",
+                "outputKey": "0"
+              },
+              {
+                "operation": "equal",
+                "value2": "RUN_WRITING",
+                "outputKey": "1"
+              },
+              {
+                "operation": "equal",
+                "value2": "RUN_REVIEW",
+                "outputKey": "2"
+              },
+              {
+                "operation": "equal",
+                "value2": "REQUEST_REVISION",
+                "outputKey": "3"
+              },
+              {
+                "operation": "equal",
+                "value2": "SEND_HUMAN_APPROVAL",
+                "outputKey": "4"
+              },
+              {
+                "operation": "equal",
+                "value2": "PUBLISH",
+                "outputKey": "5"
+              },
+              {
+                "operation": "equal",
+                "value2": "REJECT_TOPIC",
+                "outputKey": "6"
+              },
+              {
+                "operation": "equal",
+                "value2": "END_REJECTED",
+                "outputKey": "7"
+              },
+              {
+                "operation": "equal",
+                "value2": "END_SUCCESS",
+                "outputKey": "8"
+              },
+              {
+                "operation": "equal",
+                "value2": "END_FAILED",
+                "outputKey": "9"
+              }
+            ]
+          },
+          "mode": "rules",
+          "options": {
+            "fallbackOutput": 6
+          }
+        }
+      },
+      {
+        "id": "10b6b0c6-ef9c-44c0-b8a4-f16c590fb733",
+        "name": "Run Research",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1,
+        "position": [
+          1920,
+          -220
+        ],
+        "parameters": {
+          "workflowId": "={{$env.WF_RESEARCH_ID}}",
+          "options": {
+            "waitForSubWorkflow": true
+          }
+        },
+        "notes": "Set WF_RESEARCH_ID in n8n environment or switch to static workflow ID.",
+        "notesInFlow": true
+      },
+      {
+        "id": "1a52327a-2329-412c-8636-dedb980ddace",
+        "name": "Persist After Research",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          2160,
+          -300
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO content_runs (run_id, status, topic, idempotency_key, state, updated_at)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.status}}',\n  '{{$json.topic}}',\n  '{{ $json.idempotency_key || \"\" }}',\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (run_id)\nDO UPDATE SET\n  status = EXCLUDED.status,\n  topic = EXCLUDED.topic,\n  idempotency_key = EXCLUDED.idempotency_key,\n  state = EXCLUDED.state,\n  updated_at = NOW();",
+          "options": {}
+        },
+        "continueOnFail": true,
+        "credentials": {
+          "postgres": {
+            "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+            "name": "Local Postgres (n8n)"
+          }
+        }
+      },
+      {
+        "id": "b2fb9522-4e59-44fe-baba-26245a1d787d",
+        "name": "Run Writing",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1,
+        "position": [
+          1920,
+          -60
+        ],
+        "parameters": {
+          "workflowId": "={{$env.WF_WRITING_ID}}",
+          "options": {
+            "waitForSubWorkflow": true
+          }
+        },
+        "notes": "Set WF_WRITING_ID in n8n environment or switch to static workflow ID.",
+        "notesInFlow": true
+      },
+      {
+        "id": "3189973a-1e33-4cec-b6d5-085bcab91e3e",
+        "name": "Persist After Writing",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          2160,
+          -120
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO content_runs (run_id, status, topic, idempotency_key, state, updated_at)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.status}}',\n  '{{$json.topic}}',\n  '{{ $json.idempotency_key || \"\" }}',\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (run_id)\nDO UPDATE SET\n  status = EXCLUDED.status,\n  topic = EXCLUDED.topic,\n  idempotency_key = EXCLUDED.idempotency_key,\n  state = EXCLUDED.state,\n  updated_at = NOW();",
+          "options": {}
+        },
+        "continueOnFail": true,
+        "credentials": {
+          "postgres": {
+            "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+            "name": "Local Postgres (n8n)"
+          }
+        }
+      },
+      {
+        "id": "cc35c834-5156-45dc-a99a-7ccff6dbc430",
+        "name": "Run Review",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1,
+        "position": [
+          1920,
+          100
+        ],
+        "parameters": {
+          "workflowId": "={{$env.WF_REVIEW_ID}}",
+          "options": {
+            "waitForSubWorkflow": true
+          }
+        },
+        "notes": "Set WF_REVIEW_ID in n8n environment or switch to static workflow ID.",
+        "notesInFlow": true
+      },
+      {
+        "id": "786f6613-347d-433d-88a9-e1bc64242c64",
+        "name": "Output Rule Guardrail",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2160,
+          100
+        ],
+        "parameters": {
+          "jsCode": "const content = ($json.markdown_content ?? '').trim();\nconst headings = [...content.matchAll(/^##?\\s+(.+)$/gm)].map((m) => m[1]);\nconst wordCount = content ? content.split(/\\s+/).length : 0;\nconst hasIntro = /(^|\\n)#\\s+/.test(content) || /introduction/i.test(content);\nconst hasConclusion = /conclusion/i.test(content);\n\nconst missing = [];\nif (wordCount < 600) missing.push('minimum_word_count_600');\nif (!hasIntro) missing.push('missing_intro');\nif (!hasConclusion) missing.push('missing_conclusion');\nif (headings.length < 4) missing.push('minimum_4_headings');\n\n$json.output_guardrail = {\n  ...($json.output_guardrail ?? {}),\n  rule_checks: {\n    word_count: wordCount,\n    heading_count: headings.length,\n    has_intro: hasIntro,\n    has_conclusion: hasConclusion,\n  },\n  missing_required_sections: missing,\n};\n\nreturn [{ json: $json }];"
+        }
+      },
+      {
+        "id": "4eb3509c-41bb-44c8-a8f6-6eec13c34dce",
+        "name": "Output AI Guardrail",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2400,
+          100
+        ],
+        "parameters": {
+          "jsCode": "const review = $json.review ?? {};\nconst missing = $json.output_guardrail?.missing_required_sections ?? [];\nconst policyViolations = review.policy_violations ?? [];\nconst lowQuality = (review.quality_score ?? 0) < 80;\nconst highHallucination = review.hallucination_risk === 'high';\n\nlet guardrailPass = true;\nconst violations = [];\nif (policyViolations.length > 0) {\n  guardrailPass = false;\n  violations.push(...policyViolations);\n}\nif (missing.length > 0) {\n  guardrailPass = false;\n  violations.push('missing_required_sections');\n}\nif (lowQuality) {\n  guardrailPass = false;\n  violations.push('low_quality_score');\n}\nif (highHallucination) {\n  guardrailPass = false;\n  violations.push('high_hallucination_risk');\n}\n\n$json.output_guardrail = {\n  ...($json.output_guardrail ?? {}),\n  guardrail_pass: guardrailPass,\n  violations,\n  risk_level: highHallucination ? 'high' : (lowQuality ? 'medium' : 'low'),\n  hallucination_risk: review.hallucination_risk ?? 'unknown',\n  action: guardrailPass ? 'pass' : 'revise',\n};\n\nreturn [{ json: $json }];"
+        }
+      },
+      {
+        "id": "21855d13-ca97-46a4-a9cf-900fbb2ffc86",
+        "name": "Quality Gate",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 1,
+        "position": [
+          2640,
+          100
+        ],
+        "parameters": {
+          "conditions": {
+            "boolean": [
+              {
+                "value1": "={{$json.output_guardrail.guardrail_pass}}",
+                "value2": true,
+                "operation": "equal"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "f629fca7-6961-498a-ba77-7f5f2661b42f",
+        "name": "Revision Counter",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2880,
+          180
+        ],
+        "parameters": {
+          "jsCode": "$json.revision_count = Number($json.revision_count ?? 0) + 1;\n$json.status = 'revision_requested';\n$json.timestamps.updated_at = new Date().toISOString();\n\nif ($json.revision_count > ($json.max_revision_attempts ?? 2)) {\n  $json.status = 'failed';\n  $json.supervisor = {\n    ...($json.supervisor ?? {}),\n    next_action: 'END_FAILED',\n    reason: 'Max revisions exceeded.',\n    decided_at: new Date().toISOString(),\n  };\n}\n\nreturn [{ json: $json }];"
+        }
+      },
+      {
+        "id": "721d2b36-f7ba-41a4-812d-6bca35f35fa8",
+        "name": "Need Human Approval",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1,
+        "position": [
+          1920,
+          260
+        ],
+        "parameters": {
+          "workflowId": "={{$env.WF_APPROVAL_ID}}",
+          "options": {
+            "waitForSubWorkflow": true
+          }
+        },
+        "notes": "Set WF_APPROVAL_ID in n8n environment or switch to static workflow ID.",
+        "notesInFlow": true
+      },
+      {
+        "id": "7f773920-2eb0-4af3-b495-f7bbcf2d9618",
+        "name": "Approval Decision",
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 2,
+        "position": [
+          2160,
+          260
+        ],
+        "parameters": {
+          "dataType": "string",
+          "value1": "={{$json.approval.status}}",
+          "rules": {
+            "rules": [
+              {
+                "operation": "equal",
+                "value2": "approved",
+                "outputKey": "0"
+              },
+              {
+                "operation": "equal",
+                "value2": "rejected",
+                "outputKey": "1"
+              },
+              {
+                "operation": "equal",
+                "value2": "pending",
+                "outputKey": "2"
+              }
+            ]
+          },
+          "mode": "rules",
+          "options": {
+            "fallbackOutput": 2
+          }
+        }
+      },
+      {
+        "id": "0eaa9d6f-dee8-49c6-93f9-4244adbb7dc0",
+        "name": "Run Publish",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1,
+        "position": [
+          1920,
+          420
+        ],
+        "parameters": {
+          "workflowId": "={{$env.WF_PUBLISH_ID}}",
+          "options": {
+            "waitForSubWorkflow": true
+          }
+        },
+        "notes": "Set WF_PUBLISH_ID in n8n environment or switch to static workflow ID.",
+        "notesInFlow": true
+      },
+      {
+        "id": "3cb459b7-0d81-431f-81dc-a7520a9d6db7",
+        "name": "Persist Final State",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          2160,
+          520
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO content_runs (run_id, status, topic, idempotency_key, state, updated_at)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.status}}',\n  '{{$json.topic}}',\n  '{{ $json.idempotency_key || \"\" }}',\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (run_id)\nDO UPDATE SET\n  status = EXCLUDED.status,\n  topic = EXCLUDED.topic,\n  idempotency_key = EXCLUDED.idempotency_key,\n  state = EXCLUDED.state,\n  updated_at = NOW();",
+          "options": {}
+        },
+        "continueOnFail": true,
+        "credentials": {
+          "postgres": {
+            "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+            "name": "Local Postgres (n8n)"
+          }
+        }
+      },
+      {
+        "id": "88161bd7-d539-4163-ab6d-adc24ecb7e12",
+        "name": "Notify Result",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2400,
+          420
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{$env.NOTIFICATION_WEBHOOK_URL || \"https://example.com/hooks/content-status\"}}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ { run_id: $json.run_id, status: $json.status, topic: $json.topic, approval_status: $json.approval?.status, publish_status: $json.publish?.status, published_url: $json.publish?.url || null, updated_at: new Date().toISOString() } }}",
+          "options": {
+            "timeout": 30000
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "id": "ee03020c-c1c9-4ecc-9cba-9212594ac3e9",
+        "name": "Return API Response",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1,
+        "position": [
+          2640,
+          420
+        ],
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ $json.response || { run_id: $json.run_id, status: $json.status, topic: $json.topic, title: $json.title, approval_status: $json.approval?.status, publish_status: $json.publish?.status, published_url: $json.publish?.url || null, revision_count: $json.revision_count, updated_at: $json.timestamps?.updated_at } }}",
+          "options": {}
+        }
+      }
+    ],
+    "connections": {
+      "Topic Intake": {
+        "main": [
+          [
+            {
+              "node": "Normalize Input",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Normalize Input": {
+        "main": [
+          [
+            {
+              "node": "Init Run State",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Init Run State": {
+        "main": [
+          [
+            {
+              "node": "Persist Run Created",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Input Rule Guardrail",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Input Rule Guardrail": {
+        "main": [
+          [
+            {
+              "node": "Input AI Guardrail",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Input AI Guardrail": {
+        "main": [
+          [
+            {
+              "node": "Input Allowed?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Input Allowed?": {
+        "main": [
+          [
+            {
+              "node": "Supervisor Decision",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Persist Final State",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Notify Result",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Return API Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Supervisor Decision": {
+        "main": [
+          [
+            {
+              "node": "Route Action",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Route Action": {
+        "main": [
+          [
+            {
+              "node": "Run Research",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Run Writing",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Run Review",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Revision Counter",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Need Human Approval",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Run Publish",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Persist Final State",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Notify Result",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Return API Response",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Persist Final State",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Notify Result",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Return API Response",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Persist Final State",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Notify Result",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Return API Response",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Persist Final State",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Notify Result",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Return API Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Run Research": {
+        "main": [
+          [
+            {
+              "node": "Persist After Research",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Supervisor Decision",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Run Writing": {
+        "main": [
+          [
+            {
+              "node": "Persist After Writing",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Supervisor Decision",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Run Review": {
+        "main": [
+          [
+            {
+              "node": "Output Rule Guardrail",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Output Rule Guardrail": {
+        "main": [
+          [
+            {
+              "node": "Output AI Guardrail",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Output AI Guardrail": {
+        "main": [
+          [
+            {
+              "node": "Quality Gate",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Quality Gate": {
+        "main": [
+          [
+            {
+              "node": "Supervisor Decision",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Revision Counter",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Revision Counter": {
+        "main": [
+          [
+            {
+              "node": "Supervisor Decision",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Need Human Approval": {
+        "main": [
+          [
+            {
+              "node": "Approval Decision",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Approval Decision": {
+        "main": [
+          [
+            {
+              "node": "Supervisor Decision",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Persist Final State",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Notify Result",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Return API Response",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Need Human Approval",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Run Publish": {
+        "main": [
+          [
+            {
+              "node": "Persist Final State",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Notify Result",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Return API Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "saveDataErrorExecution": "all",
+      "saveDataSuccessExecution": "all",
+      "saveExecutionProgress": true,
+      "saveManualExecutions": true,
+      "timezone": "UTC"
+    },
+    "staticData": null,
+    "pinData": {},
+    "active": false,
+    "tags": [],
+    "versionId": "04428ee4-9953-4665-8578-7ba2de3af2cb",
+    "meta": {
+      "templateCredsSetupCompleted": false,
+      "generatedAt": "2026-03-09T04:14:51.808Z"
+    }
+  },
+  {
+    "id": "NbYRm4o71mJb4oVF",
+    "name": "WF_Research",
+    "nodes": [
+      {
+        "id": "1c31483a-68ac-42b6-b8aa-10f1b24418ac",
+        "name": "Execute Workflow Trigger",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "2e34226a-d561-404b-a1d3-eb8e0f61464d",
+        "name": "Search API",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          240,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{$env.TAVILY_API_URL || \"https://api.tavily.com/search\"}}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Authorization",
+                "value": "={{$env.TAVILY_API_KEY ? `Bearer ${$env.TAVILY_API_KEY}` : \"\"}}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ { query: $json.topic, max_results: 8, include_answer: false, search_depth: \"advanced\" } }}",
+          "options": {
+            "timeout": 45000
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "id": "1a50867c-1a3c-4d03-9f82-50c22a68bc95",
+        "name": "Research Synthesizer",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          480,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{$env.OPENAI_API_URL || \"https://api.openai.com/v1/chat/completions\"}}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Authorization",
+                "value": "={{`Bearer ${$env.OPENAI_API_KEY || \"\"}`}}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ {\n  model: $env.OPENAI_MODEL || 'gpt-4o-mini',\n  temperature: 0.2,\n  response_format: { type: 'json_object' },\n  messages: [\n    {\n      role: 'system',\n      content: 'You are ResearchAgent. Return ONLY JSON: {\"research\":{\"notes\":[\"string\"],\"sources\":[{\"title\":\"string\",\"url\":\"string\",\"snippet\":\"string\"}],\"citations\":[\"string\"],\"gaps\":[\"string\"],\"confidence\":\"high|medium|low\"}}'\n    },\n    {\n      role: 'user',\n      content: JSON.stringify({\n        topic: $items('Execute Workflow Trigger', 0, 0)[0].json.topic,\n        search_results: $json,\n      })\n    }\n  ]\n} }",
+          "options": {
+            "timeout": 60000
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "id": "f511cd70-fc37-49e5-8805-da275294bff7",
+        "name": "Merge Research Into State",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          720,
+          0
+        ],
+        "parameters": {
+          "jsCode": "const state = $items('Execute Workflow Trigger', 0, 0)[0].json;\n\nlet parsed;\ntry {\n  const content = $json.choices?.[0]?.message?.content ?? '{}';\n  parsed = typeof content === 'string' ? JSON.parse(content) : content;\n} catch (error) {\n  parsed = {\n    research: {\n      notes: ['Research synthesis parser fallback triggered.'],\n      sources: [],\n      citations: [],\n      gaps: ['AI parser fallback: inspect Search API response manually.'],\n      confidence: 'low',\n    },\n  };\n}\n\nconst research = parsed.research ?? {};\nconst merged = {\n  ...state,\n  status: 'researched',\n  research: {\n    notes: Array.isArray(research.notes) ? research.notes : [],\n    sources: Array.isArray(research.sources) ? research.sources : [],\n    citations: Array.isArray(research.citations) ? research.citations : [],\n    gaps: Array.isArray(research.gaps) ? research.gaps : [],\n    confidence: research.confidence ?? 'low',\n  },\n};\nmerged.timestamps = {\n  ...(merged.timestamps ?? {}),\n  updated_at: new Date().toISOString(),\n};\n\nreturn [{ json: merged }];"
+        }
+      },
+      {
+        "id": "c00df447-a3fc-4787-9de4-f5d7e97ada04",
+        "name": "Persist Research",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          960,
+          -120
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO content_runs (run_id, status, topic, idempotency_key, state, updated_at)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.status}}',\n  '{{$json.topic}}',\n  '{{ $json.idempotency_key || \"\" }}',\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (run_id)\nDO UPDATE SET\n  status = EXCLUDED.status,\n  topic = EXCLUDED.topic,\n  idempotency_key = EXCLUDED.idempotency_key,\n  state = EXCLUDED.state,\n  updated_at = NOW();",
+          "options": {}
+        },
+        "continueOnFail": true,
+        "credentials": {
+          "postgres": {
+            "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+            "name": "Local Postgres (n8n)"
+          }
+        }
+      },
+      {
+        "id": "ee83288f-cd3e-4331-8938-0335c61f1b62",
+        "name": "Return Researched State",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          960,
+          40
+        ],
+        "parameters": {
+          "jsCode": "return items;"
+        }
+      }
+    ],
+    "connections": {
+      "Execute Workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "Search API",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Search API": {
+        "main": [
+          [
+            {
+              "node": "Research Synthesizer",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Research Synthesizer": {
+        "main": [
+          [
+            {
+              "node": "Merge Research Into State",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Merge Research Into State": {
+        "main": [
+          [
+            {
+              "node": "Persist Research",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Return Researched State",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "saveDataErrorExecution": "all",
+      "saveDataSuccessExecution": "all",
+      "saveExecutionProgress": true,
+      "saveManualExecutions": true,
+      "timezone": "UTC"
+    },
+    "staticData": null,
+    "pinData": {},
+    "active": false,
+    "tags": [],
+    "versionId": "a2da3bdb-d622-46b4-9b00-e6195d511836",
+    "meta": {
+      "templateCredsSetupCompleted": false,
+      "generatedAt": "2026-03-09T04:14:51.808Z"
+    }
+  },
+  {
+    "id": "BLFjsXtkK2wNSFtX",
+    "name": "WF_Writing",
+    "nodes": [
+      {
+        "id": "6dc8d8f6-aa35-4dbb-bacb-8ca50eb26e1d",
+        "name": "Execute Workflow Trigger",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "e987df4a-a9cb-4703-902e-148338fa1e8f",
+        "name": "Writer Agent",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          240,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{$env.OPENAI_API_URL || \"https://api.openai.com/v1/chat/completions\"}}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Authorization",
+                "value": "={{`Bearer ${$env.OPENAI_API_KEY || \"\"}`}}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ {\n  model: $env.OPENAI_MODEL || 'gpt-4o-mini',\n  temperature: 0.4,\n  response_format: { type: 'json_object' },\n  messages: [\n    {\n      role: 'system',\n      content: 'You are WriterAgent. Return ONLY JSON: {\"title\":\"string\",\"summary\":\"string\",\"sections\":[{\"heading\":\"string\",\"bullets\":[\"string\"]}],\"markdown_content\":\"string\"}. Use research notes only.'\n    },\n    {\n      role: 'user',\n      content: JSON.stringify($json)\n    }\n  ]\n} }",
+          "options": {
+            "timeout": 90000
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "id": "eeca61c2-8ef9-44b1-bbee-9c4472e8b293",
+        "name": "Writer Format Validator",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          480,
+          0
+        ],
+        "parameters": {
+          "jsCode": "const state = $items('Execute Workflow Trigger', 0, 0)[0].json;\n\nlet parsed;\ntry {\n  const content = $json.choices?.[0]?.message?.content ?? '{}';\n  parsed = typeof content === 'string' ? JSON.parse(content) : content;\n} catch (error) {\n  parsed = {};\n}\n\nconst fallbackTitle = (state.topic ?? 'Untitled Topic') + ' - Practical Guide';\nconst fallbackSummary = 'Draft generated with fallback writer formatter. Please review before publishing.';\nconst fallbackSections = [\n  { heading: 'Introduction', bullets: ['Context and problem statement'] },\n  { heading: 'Core Concepts', bullets: ['Definitions', 'Comparisons'] },\n  { heading: 'Implementation Guidance', bullets: ['Practical decisions'] },\n  { heading: 'Conclusion', bullets: ['Key takeaways'] },\n];\n\nconst markdown = (parsed.markdown_content ?? '').toString().trim();\n\nconst merged = {\n  ...state,\n  status: 'drafted',\n  title: (parsed.title ?? fallbackTitle).toString(),\n  summary: (parsed.summary ?? fallbackSummary).toString(),\n  sections: Array.isArray(parsed.sections) && parsed.sections.length > 0 ? parsed.sections : fallbackSections,\n  markdown_content: markdown || ('# ' + fallbackTitle + '\\n\\n' + fallbackSummary + '\\n\\n## Introduction\\n\\nDraft fallback content generated because writer output was empty.'),\n};\n\nmerged.timestamps = {\n  ...(merged.timestamps ?? {}),\n  updated_at: new Date().toISOString(),\n};\n\nreturn [{ json: merged }];"
+        }
+      },
+      {
+        "id": "3ec802dd-481f-4205-8684-8753249485f6",
+        "name": "Persist Draft",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          720,
+          -120
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO content_runs (run_id, status, topic, idempotency_key, state, updated_at)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.status}}',\n  '{{$json.topic}}',\n  '{{ $json.idempotency_key || \"\" }}',\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (run_id)\nDO UPDATE SET\n  status = EXCLUDED.status,\n  topic = EXCLUDED.topic,\n  idempotency_key = EXCLUDED.idempotency_key,\n  state = EXCLUDED.state,\n  updated_at = NOW();",
+          "options": {}
+        },
+        "continueOnFail": true,
+        "credentials": {
+          "postgres": {
+            "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+            "name": "Local Postgres (n8n)"
+          }
+        }
+      },
+      {
+        "id": "a7998745-d19f-4a20-a12b-842288da0bd9",
+        "name": "Return Draft State",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          720,
+          40
+        ],
+        "parameters": {
+          "jsCode": "return items;"
+        }
+      }
+    ],
+    "connections": {
+      "Execute Workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "Writer Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Writer Agent": {
+        "main": [
+          [
+            {
+              "node": "Writer Format Validator",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Writer Format Validator": {
+        "main": [
+          [
+            {
+              "node": "Persist Draft",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Return Draft State",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "saveDataErrorExecution": "all",
+      "saveDataSuccessExecution": "all",
+      "saveExecutionProgress": true,
+      "saveManualExecutions": true,
+      "timezone": "UTC"
+    },
+    "staticData": null,
+    "pinData": {},
+    "active": false,
+    "tags": [],
+    "versionId": "f261283e-cde2-49e7-9fa8-5fb25b3da9db",
+    "meta": {
+      "templateCredsSetupCompleted": false,
+      "generatedAt": "2026-03-09T04:14:51.808Z"
+    }
+  },
+  {
+    "id": "l4LkiyInweNhjbAY",
+    "name": "WF_Review",
+    "nodes": [
+      {
+        "id": "72568369-76a2-462f-8f9b-5549e5774dc9",
+        "name": "Execute Workflow Trigger",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "e1ecf45d-6817-4920-90da-219895aa5cb5",
+        "name": "Review Agent",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          240,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{$env.OPENAI_API_URL || \"https://api.openai.com/v1/chat/completions\"}}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Authorization",
+                "value": "={{`Bearer ${$env.OPENAI_API_KEY || \"\"}`}}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ {\n  model: $env.OPENAI_MODEL || 'gpt-4o-mini',\n  temperature: 0.1,\n  response_format: { type: 'json_object' },\n  messages: [\n    {\n      role: 'system',\n      content: 'You are ReviewAgent. Return ONLY JSON: {\"review\":{\"quality_score\":0,\"strengths\":[\"string\"],\"feedback\":[\"string\"],\"missing_sections\":[\"string\"],\"policy_violations\":[\"string\"],\"hallucination_risk\":\"low|medium|high\",\"recommended_action\":\"approve_for_human|revise|reject\"}}'\n    },\n    {\n      role: 'user',\n      content: JSON.stringify($json)\n    }\n  ]\n} }",
+          "options": {
+            "timeout": 60000
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "id": "77e05186-960c-4d4e-b8a6-805012ddc32b",
+        "name": "Review Gate Rules",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          480,
+          0
+        ],
+        "parameters": {
+          "jsCode": "const state = $items('Execute Workflow Trigger', 0, 0)[0].json;\n\nlet parsed;\ntry {\n  const content = $json.choices?.[0]?.message?.content ?? '{}';\n  parsed = typeof content === 'string' ? JSON.parse(content) : content;\n} catch (error) {\n  parsed = {};\n}\n\nconst review = parsed.review ?? {};\nconst quality = Number(review.quality_score ?? 0);\nconst missingSections = Array.isArray(review.missing_sections) ? review.missing_sections : [];\nconst policyViolations = Array.isArray(review.policy_violations) ? review.policy_violations : [];\nconst hallucinationRisk = review.hallucination_risk ?? 'medium';\n\nconst merged = {\n  ...state,\n  status: 'reviewed',\n  review: {\n    quality_score: Number.isFinite(quality) ? quality : 0,\n    strengths: Array.isArray(review.strengths) ? review.strengths : [],\n    feedback: Array.isArray(review.feedback) ? review.feedback : ['No feedback generated.'],\n    missing_sections: missingSections,\n    policy_violations: policyViolations,\n    hallucination_risk: hallucinationRisk,\n    recommended_action: review.recommended_action ?? (quality >= 80 && policyViolations.length === 0 ? 'approve_for_human' : 'revise'),\n  },\n};\n\nmerged.timestamps = {\n  ...(merged.timestamps ?? {}),\n  updated_at: new Date().toISOString(),\n};\n\nreturn [{ json: merged }];"
+        }
+      },
+      {
+        "id": "96564c21-c90e-4bff-9abb-e39f7be4e3cb",
+        "name": "Persist Review",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          720,
+          -120
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO content_runs (run_id, status, topic, idempotency_key, state, updated_at)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.status}}',\n  '{{$json.topic}}',\n  '{{ $json.idempotency_key || \"\" }}',\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (run_id)\nDO UPDATE SET\n  status = EXCLUDED.status,\n  topic = EXCLUDED.topic,\n  idempotency_key = EXCLUDED.idempotency_key,\n  state = EXCLUDED.state,\n  updated_at = NOW();",
+          "options": {}
+        },
+        "continueOnFail": true,
+        "credentials": {
+          "postgres": {
+            "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+            "name": "Local Postgres (n8n)"
+          }
+        }
+      },
+      {
+        "id": "67f45e41-36cb-47be-b5b5-0a4b13c2ccb9",
+        "name": "Return Reviewed State",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          720,
+          40
+        ],
+        "parameters": {
+          "jsCode": "return items;"
+        }
+      }
+    ],
+    "connections": {
+      "Execute Workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "Review Agent",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Review Agent": {
+        "main": [
+          [
+            {
+              "node": "Review Gate Rules",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Review Gate Rules": {
+        "main": [
+          [
+            {
+              "node": "Persist Review",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Return Reviewed State",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "saveDataErrorExecution": "all",
+      "saveDataSuccessExecution": "all",
+      "saveExecutionProgress": true,
+      "saveManualExecutions": true,
+      "timezone": "UTC"
+    },
+    "staticData": null,
+    "pinData": {},
+    "active": false,
+    "tags": [],
+    "versionId": "5351455c-9ba6-4633-b2d1-0256b70c75b0",
+    "meta": {
+      "templateCredsSetupCompleted": false,
+      "generatedAt": "2026-03-09T04:14:51.808Z"
+    }
+  },
+  {
+    "id": "OffiJWXlGPfaHCyM",
+    "name": "WF_Approval",
+    "nodes": [
+      {
+        "id": "0bb0c6f8-fb43-4ded-a847-15a05f6dae52",
+        "name": "Execute Workflow Trigger",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "2fe9f661-ed38-4f37-bbe7-684b24fcb91a",
+        "name": "Generate approval token",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          240,
+          0
+        ],
+        "parameters": {
+          "jsCode": "const state = { ...$json };\nconst token = ($env.APPROVAL_SHARED_SECRET ?? Math.random().toString(36).slice(2, 12)).toString();\nconst callbackBase = ($env.APPROVAL_CALLBACK_URL ?? 'https://your-n8n-instance/webhook/content-approval-callback').toString();\n\nstate.approval = {\n  ...(state.approval ?? {}),\n  status: state.approval?.status && state.approval.status !== 'not_requested' ? state.approval.status : 'pending',\n  token,\n  callback_url: callbackBase,\n  requested_at: new Date().toISOString(),\n};\nstate.status = state.approval.status === 'approved' ? 'approved_for_publish' : 'awaiting_approval';\nstate.timestamps = {\n  ...(state.timestamps ?? {}),\n  updated_at: new Date().toISOString(),\n};\n\nreturn [{ json: state }];"
+        }
+      },
+      {
+        "id": "a6e40215-90ba-49cc-ac65-a57a9c1ca247",
+        "name": "Persist pending approval",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          480,
+          -120
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO content_runs (run_id, status, topic, idempotency_key, state, updated_at)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.status}}',\n  '{{$json.topic}}',\n  '{{ $json.idempotency_key || \"\" }}',\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (run_id)\nDO UPDATE SET\n  status = EXCLUDED.status,\n  topic = EXCLUDED.topic,\n  idempotency_key = EXCLUDED.idempotency_key,\n  state = EXCLUDED.state,\n  updated_at = NOW();",
+          "options": {}
+        },
+        "continueOnFail": true,
+        "credentials": {
+          "postgres": {
+            "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+            "name": "Local Postgres (n8n)"
+          }
+        }
+      },
+      {
+        "id": "5eb3b1c3-038e-4472-a104-573c8094c538",
+        "name": "Approval Channel",
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 2,
+        "position": [
+          480,
+          40
+        ],
+        "parameters": {
+          "dataType": "string",
+          "value1": "={{$json.approval.channel || \"slack\"}}",
+          "rules": {
+            "rules": [
+              {
+                "operation": "equal",
+                "value2": "slack",
+                "outputKey": "0"
+              },
+              {
+                "operation": "equal",
+                "value2": "email",
+                "outputKey": "1"
+              },
+              {
+                "operation": "equal",
+                "value2": "webhook",
+                "outputKey": "2"
+              }
+            ]
+          },
+          "mode": "rules",
+          "options": {
+            "fallbackOutput": 0
+          }
+        }
+      },
+      {
+        "id": "d6bfdc2b-a66b-40c7-943a-6eba40e1713a",
+        "name": "Send Slack Approval",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          720,
+          -80
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{$env.SLACK_APPROVAL_WEBHOOK_URL || \"https://example.com/slack-webhook\"}}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ { text: `Approval required for run ${$json.run_id}: ${$json.title || $json.topic}`, attachments: [{ text: `Approve: ${$json.approval.callback_url}?run_id=${$json.run_id}&decision=approve&token=${$json.approval.token}` }, { text: `Reject: ${$json.approval.callback_url}?run_id=${$json.run_id}&decision=reject&token=${$json.approval.token}` }] } }}",
+          "options": {
+            "timeout": 30000
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "id": "dcb25fb8-5fef-44ae-b77d-90d874cacf39",
+        "name": "Send Email Approval",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          720,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{$env.EMAIL_API_URL || \"https://example.com/send-email\"}}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ { to: $env.APPROVER_EMAIL || \"editor@example.com\", subject: `Approval needed: ${$json.title || $json.topic}`, html: `<p>Run: ${$json.run_id}</p><p><a href=\"${$json.approval.callback_url}?run_id=${$json.run_id}&decision=approve&token=${$json.approval.token}\">Approve</a></p><p><a href=\"${$json.approval.callback_url}?run_id=${$json.run_id}&decision=reject&token=${$json.approval.token}\">Reject</a></p>` } }}",
+          "options": {
+            "timeout": 30000
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "id": "cbf4e929-45db-4fe5-9b15-ffaca610ff0e",
+        "name": "Send Webhook/Form Approval",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          720,
+          80
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{$env.APPROVAL_FORM_DISPATCH_URL || \"https://example.com/approval-form-dispatch\"}}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ { run_id: $json.run_id, title: $json.title || $json.topic, summary: $json.summary, callback_url: $json.approval.callback_url, token: $json.approval.token } }}",
+          "options": {
+            "timeout": 30000
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "id": "7c9c7d76-8018-4230-a3d3-ebdea291c336",
+        "name": "Wait 5m",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          960,
+          0
+        ],
+        "parameters": {
+          "resume": "timeInterval",
+          "amount": 5,
+          "unit": "minutes"
+        }
+      },
+      {
+        "id": "f88ccee6-5a67-4050-b58a-901e9415a7ed",
+        "name": "Read approval state",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          1200,
+          0
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT state FROM content_runs WHERE run_id = '{{$json.run_id}}' LIMIT 1;",
+          "options": {}
+        },
+        "continueOnFail": true,
+        "credentials": {
+          "postgres": {
+            "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+            "name": "Local Postgres (n8n)"
+          }
+        }
+      },
+      {
+        "id": "45cd09f0-daf3-4545-982f-c90c1ddecb42",
+        "name": "Approval State Mapper",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1440,
+          0
+        ],
+        "parameters": {
+          "jsCode": "const original = $items('Generate approval token', 0, 0)[0].json;\nlet state = null;\n\nif (Array.isArray($json) && $json.length > 0 && $json[0].state) {\n  state = $json[0].state;\n} else if ($json.state) {\n  state = $json.state;\n}\n\nif (typeof state === 'string') {\n  try {\n    state = JSON.parse(state);\n  } catch (error) {\n    state = null;\n  }\n}\n\nconst merged = state && typeof state === 'object'\n  ? { ...original, ...state, approval: { ...(original.approval ?? {}), ...(state.approval ?? {}) } }\n  : { ...original };\n\nmerged.approval = {\n  ...(merged.approval ?? {}),\n  status: merged.approval?.status ?? 'pending',\n};\n\nmerged.timestamps = {\n  ...(merged.timestamps ?? {}),\n  updated_at: new Date().toISOString(),\n};\n\nreturn [{ json: merged }];"
+        }
+      },
+      {
+        "id": "a50067b9-9e7c-40b4-b513-c856952c3f41",
+        "name": "Approved or Rejected?",
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 2,
+        "position": [
+          1680,
+          0
+        ],
+        "parameters": {
+          "dataType": "string",
+          "value1": "={{$json.approval.status}}",
+          "rules": {
+            "rules": [
+              {
+                "operation": "equal",
+                "value2": "approved",
+                "outputKey": "0"
+              },
+              {
+                "operation": "equal",
+                "value2": "rejected",
+                "outputKey": "1"
+              },
+              {
+                "operation": "equal",
+                "value2": "pending",
+                "outputKey": "2"
+              }
+            ]
+          },
+          "mode": "rules",
+          "options": {
+            "fallbackOutput": 2
+          }
+        }
+      },
+      {
+        "id": "beea8612-04fb-40a6-94da-ce517d8e4631",
+        "name": "Return Approval State",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1920,
+          -80
+        ],
+        "parameters": {
+          "jsCode": "const out = { ...$json };\nout.status = out.approval?.status === 'approved' ? 'approved_for_publish' : (out.approval?.status === 'rejected' ? 'approval_rejected' : 'awaiting_approval');\nout.timestamps = {\n  ...(out.timestamps ?? {}),\n  updated_at: new Date().toISOString(),\n};\nreturn [{ json: out }];"
+        }
+      }
+    ],
+    "connections": {
+      "Execute Workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "Generate approval token",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Generate approval token": {
+        "main": [
+          [
+            {
+              "node": "Persist pending approval",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Approval Channel",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Approval Channel": {
+        "main": [
+          [
+            {
+              "node": "Send Slack Approval",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Send Email Approval",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Send Webhook/Form Approval",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send Slack Approval": {
+        "main": [
+          [
+            {
+              "node": "Wait 5m",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send Email Approval": {
+        "main": [
+          [
+            {
+              "node": "Wait 5m",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send Webhook/Form Approval": {
+        "main": [
+          [
+            {
+              "node": "Wait 5m",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Wait 5m": {
+        "main": [
+          [
+            {
+              "node": "Read approval state",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Read approval state": {
+        "main": [
+          [
+            {
+              "node": "Approval State Mapper",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Approval State Mapper": {
+        "main": [
+          [
+            {
+              "node": "Approved or Rejected?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Approved or Rejected?": {
+        "main": [
+          [
+            {
+              "node": "Return Approval State",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Return Approval State",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Wait 5m",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "saveDataErrorExecution": "all",
+      "saveDataSuccessExecution": "all",
+      "saveExecutionProgress": true,
+      "saveManualExecutions": true,
+      "timezone": "UTC"
+    },
+    "staticData": null,
+    "pinData": {},
+    "active": false,
+    "tags": [],
+    "versionId": "3431fe6c-9a60-490e-8738-b5405b519ac8",
+    "meta": {
+      "templateCredsSetupCompleted": false,
+      "generatedAt": "2026-03-09T04:14:51.808Z"
+    }
+  },
+  {
+    "id": "kURHDIEDPlXF39O9",
+    "name": "WF_Approval_Callback",
+    "nodes": [
+      {
+        "id": "bff76afd-4fa2-43e0-ae03-07ec16cfad7c",
+        "name": "Approval Callback",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "content-approval-callback",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "webhookId": "50cbbaa0-f927-49a7-a918-8549ec7750ab"
+      },
+      {
+        "id": "95848dfd-f22f-4836-9b21-19437fdd2d61",
+        "name": "Validate token + decision",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          240,
+          0
+        ],
+        "parameters": {
+          "jsCode": "const payload = $json.body ?? $json;\nconst decisionRaw = (payload.decision ?? '').toString().toLowerCase();\nconst decision = decisionRaw === 'approve' ? 'approved' : (decisionRaw === 'reject' ? 'rejected' : 'pending');\n\nconst runId = (payload.run_id ?? '').toString();\nconst token = (payload.token ?? '').toString();\n\nif (!runId || !token) {\n  return [{\n    json: {\n      statusCode: 400,\n      ok: false,\n      message: 'run_id and token are required',\n      decision: 'pending',\n      run_id: runId,\n    },\n  }];\n}\n\nconst approvedToken = ($env.APPROVAL_SHARED_SECRET ?? '').toString();\nif (approvedToken && token !== approvedToken) {\n  return [{\n    json: {\n      statusCode: 403,\n      ok: false,\n      message: 'Invalid approval token',\n      decision: 'pending',\n      run_id: runId,\n    },\n  }];\n}\n\nreturn [{\n  json: {\n    run_id: runId,\n    decision,\n    approver: (payload.approver ?? 'human-reviewer').toString(),\n    comments: (payload.comments ?? '').toString(),\n    channel: (payload.channel ?? 'webhook').toString(),\n    decided_at: new Date().toISOString(),\n    statusCode: 200,\n    ok: true,\n    message: 'Approval callback accepted',\n  },\n}];"
+        }
+      },
+      {
+        "id": "027e7521-dbe3-4fe5-9bce-8844c36fd647",
+        "name": "Update approval state",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          480,
+          -120
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "UPDATE content_runs\nSET\n  state = jsonb_set(\n    jsonb_set(\n      jsonb_set(state, '{approval,status}', to_jsonb('{{$json.decision}}'::text), true),\n      '{approval,approver}', to_jsonb('{{$json.approver}}'::text), true\n    ),\n    '{approval,decided_at}', to_jsonb('{{$json.decided_at}}'::text), true\n  ),\n  status = CASE WHEN '{{$json.decision}}' = 'approved' THEN 'approved_for_publish' WHEN '{{$json.decision}}' = 'rejected' THEN 'approval_rejected' ELSE status END,\n  updated_at = NOW()\nWHERE run_id = '{{$json.run_id}}';",
+          "options": {}
+        },
+        "continueOnFail": true,
+        "credentials": {
+          "postgres": {
+            "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+            "name": "Local Postgres (n8n)"
+          }
+        }
+      },
+      {
+        "id": "29bea3f1-6e9c-4cce-b5c8-6c95c4ee577f",
+        "name": "Approval Callback Response",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1,
+        "position": [
+          480,
+          40
+        ],
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ { ok: $json.ok, message: $json.message, run_id: $json.run_id, decision: $json.decision } }}",
+          "options": {
+            "responseCode": "={{$json.statusCode || 200}}"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Approval Callback": {
+        "main": [
+          [
+            {
+              "node": "Validate token + decision",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Validate token + decision": {
+        "main": [
+          [
+            {
+              "node": "Update approval state",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Approval Callback Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "saveDataErrorExecution": "all",
+      "saveDataSuccessExecution": "all",
+      "saveExecutionProgress": true,
+      "saveManualExecutions": true,
+      "timezone": "UTC"
+    },
+    "staticData": null,
+    "pinData": {},
+    "active": false,
+    "tags": [],
+    "versionId": "49f18114-4ebc-4ba1-8d19-fa9bd0c06552",
+    "meta": {
+      "templateCredsSetupCompleted": false,
+      "generatedAt": "2026-03-09T04:14:51.808Z"
+    }
+  },
+  {
+    "id": "wBncL3VOpQEd9Zwz",
+    "name": "WF_Publish",
+    "nodes": [
+      {
+        "id": "77e10b64-4362-457b-b134-4785a07bb9bd",
+        "name": "Execute Workflow Trigger",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "cd7f3a7a-dacf-44ef-94b7-07959e66b37a",
+        "name": "Platform Route",
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 2,
+        "position": [
+          240,
+          0
+        ],
+        "parameters": {
+          "dataType": "string",
+          "value1": "={{($json.platform || $json.publish?.platform || \"devto\").toLowerCase()}}",
+          "rules": {
+            "rules": [
+              {
+                "operation": "equal",
+                "value2": "devto",
+                "outputKey": "0"
+              },
+              {
+                "operation": "equal",
+                "value2": "hashnode",
+                "outputKey": "1"
+              },
+              {
+                "operation": "equal",
+                "value2": "ghost",
+                "outputKey": "2"
+              }
+            ]
+          },
+          "mode": "rules",
+          "options": {
+            "fallbackOutput": 0
+          }
+        }
+      },
+      {
+        "id": "4a48b22f-2f8b-431a-9e4f-2d5f5c73433c",
+        "name": "Publish to Dev.to",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          480,
+          -120
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{$env.DEVTO_API_URL || \"https://dev.to/api/articles\"}}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "api-key",
+                "value": "={{$env.DEVTO_API_KEY || \"\"}}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ { article: { title: $json.title, published: true, body_markdown: $json.markdown_content, tags: [\"oauth\",\"security\",\"sso\"] } } }}",
+          "options": {
+            "timeout": 45000
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "id": "5d0756f1-6ea6-43cb-97bb-2544a58a0038",
+        "name": "Publish to Hashnode",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          480,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{$env.HASHNODE_API_URL || \"https://gql.hashnode.com\"}}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Authorization",
+                "value": "={{$env.HASHNODE_API_KEY ? `Bearer ${$env.HASHNODE_API_KEY}` : \"\"}}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ { query: \"mutation PublishPost($input: PublishPostInput!) { publishPost(input: $input) { post { id url } } }\", variables: { input: { title: $json.title, contentMarkdown: $json.markdown_content, publicationId: $env.HASHNODE_PUBLICATION_ID || \"\" } } } }}",
+          "options": {
+            "timeout": 45000
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "id": "f728a161-f50d-446a-a7d3-4fb90ba3a141",
+        "name": "Publish to Ghost",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          480,
+          120
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{$env.GHOST_API_URL || \"https://your-ghost-site/ghost/api/admin/posts/?source=html\"}}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Authorization",
+                "value": "={{`Ghost ${$env.GHOST_ADMIN_TOKEN || \"\"}`}}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ { posts: [{ title: $json.title, html: $json.markdown_content, status: \"published\" }] } }}",
+          "options": {
+            "timeout": 45000
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "id": "54f9a615-44c9-4641-a196-c313808944d7",
+        "name": "Normalize publish response",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          720,
+          0
+        ],
+        "parameters": {
+          "jsCode": "const state = $items('Execute Workflow Trigger', 0, 0)[0].json;\nlet response = $json;\n\n// Detect which node produced this payload.\nconst fromDevto = typeof response?.id !== 'undefined' && typeof response?.url === 'string';\nconst fromHashnode = response?.data?.publishPost?.post;\nconst fromGhost = response?.posts?.[0];\n\nlet url = '';\nlet articleId = '';\nlet status = 'publish_failed';\n\nif (fromDevto) {\n  url = response.url ?? '';\n  articleId = String(response.id ?? '');\n  status = url ? 'published' : 'publish_failed';\n} else if (fromHashnode) {\n  url = fromHashnode.url ?? '';\n  articleId = String(fromHashnode.id ?? '');\n  status = url ? 'published' : 'publish_failed';\n} else if (fromGhost) {\n  url = fromGhost.url ?? '';\n  articleId = String(fromGhost.id ?? '');\n  status = articleId ? 'published' : 'publish_failed';\n}\n\nconst merged = {\n  ...state,\n  status: status === 'published' ? 'published' : 'publish_failed',\n  publish: {\n    ...(state.publish ?? {}),\n    status,\n    platform: state.platform ?? state.publish?.platform ?? 'devto',\n    url,\n    article_id: articleId,\n    published_at: status === 'published' ? new Date().toISOString() : '',\n    provider_response: response,\n  },\n};\n\nmerged.timestamps = {\n  ...(merged.timestamps ?? {}),\n  updated_at: new Date().toISOString(),\n  finished_at: status === 'published' ? new Date().toISOString() : merged.timestamps?.finished_at ?? '',\n};\n\nreturn [{ json: merged }];"
+        }
+      },
+      {
+        "id": "1af70b47-f095-4328-8040-c455044fea11",
+        "name": "Persist publish",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          960,
+          -120
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO content_runs (run_id, status, topic, idempotency_key, state, updated_at)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.status}}',\n  '{{$json.topic}}',\n  '{{ $json.idempotency_key || \"\" }}',\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (run_id)\nDO UPDATE SET\n  status = EXCLUDED.status,\n  topic = EXCLUDED.topic,\n  idempotency_key = EXCLUDED.idempotency_key,\n  state = EXCLUDED.state,\n  updated_at = NOW();",
+          "options": {}
+        },
+        "continueOnFail": true,
+        "credentials": {
+          "postgres": {
+            "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+            "name": "Local Postgres (n8n)"
+          }
+        }
+      },
+      {
+        "id": "30f84190-0e63-481f-b003-9362a0222958",
+        "name": "Return Published State",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          960,
+          40
+        ],
+        "parameters": {
+          "jsCode": "return items;"
+        }
+      }
+    ],
+    "connections": {
+      "Execute Workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "Platform Route",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Platform Route": {
+        "main": [
+          [
+            {
+              "node": "Publish to Dev.to",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Publish to Hashnode",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Publish to Ghost",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Publish to Dev.to": {
+        "main": [
+          [
+            {
+              "node": "Normalize publish response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Publish to Hashnode": {
+        "main": [
+          [
+            {
+              "node": "Normalize publish response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Publish to Ghost": {
+        "main": [
+          [
+            {
+              "node": "Normalize publish response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Normalize publish response": {
+        "main": [
+          [
+            {
+              "node": "Persist publish",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Return Published State",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "saveDataErrorExecution": "all",
+      "saveDataSuccessExecution": "all",
+      "saveExecutionProgress": true,
+      "saveManualExecutions": true,
+      "timezone": "UTC"
+    },
+    "staticData": null,
+    "pinData": {},
+    "active": false,
+    "tags": [],
+    "versionId": "dafc0bae-005e-46f9-adfc-1702dbf81609",
+    "meta": {
+      "templateCredsSetupCompleted": false,
+      "generatedAt": "2026-03-09T04:14:51.808Z"
+    }
+  },
+  {
+    "id": "mT0yc9iBnl4VFyRR",
+    "name": "WF_Log_Event",
+    "nodes": [
+      {
+        "id": "00c7a88f-a1ab-4324-9517-4a899df7ff52",
+        "name": "Execute Workflow Trigger",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "7c0bf86f-d5ad-49f7-8425-0708e64abebd",
+        "name": "Build Log Event",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          240,
+          0
+        ],
+        "parameters": {
+          "jsCode": "const now = new Date().toISOString();\nconst payload = $json.payload ?? $json;\n\nreturn [{\n  json: {\n    run_id: payload.run_id ?? 'unknown',\n    stage: payload.stage ?? 'unknown',\n    level: payload.level ?? 'info',\n    message: payload.message ?? 'workflow event',\n    payload,\n    created_at: now,\n  },\n}];"
+        }
+      },
+      {
+        "id": "aa98eded-bfad-4986-a092-fa6e3787fd02",
+        "name": "Insert Event Log",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          480,
+          -120
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO content_events (run_id, stage, level, message, payload)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.stage}}',\n  '{{$json.level}}',\n  '{{$json.message}}',\n  '{{ JSON.stringify($json.payload).replace(/'/g, \"''\") }}'::jsonb\n);",
+          "options": {}
+        },
+        "continueOnFail": true,
+        "credentials": {
+          "postgres": {
+            "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+            "name": "Local Postgres (n8n)"
+          }
+        }
+      },
+      {
+        "id": "d8da96d1-09a1-4bd5-8cab-882930e12dad",
+        "name": "Return Logged Event",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          480,
+          40
+        ],
+        "parameters": {
+          "jsCode": "return items;"
+        }
+      }
+    ],
+    "connections": {
+      "Execute Workflow Trigger": {
+        "main": [
+          [
+            {
+              "node": "Build Log Event",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Log Event": {
+        "main": [
+          [
+            {
+              "node": "Insert Event Log",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Return Logged Event",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "saveDataErrorExecution": "all",
+      "saveDataSuccessExecution": "all",
+      "saveExecutionProgress": true,
+      "saveManualExecutions": true,
+      "timezone": "UTC"
+    },
+    "staticData": null,
+    "pinData": {},
+    "active": false,
+    "tags": [],
+    "versionId": "01a708d5-6cb1-4e26-8821-4b97e6c7a372",
+    "meta": {
+      "templateCredsSetupCompleted": false,
+      "generatedAt": "2026-03-09T04:14:51.808Z"
+    }
+  },
+  {
+    "id": "lZ6iKwe9lN4fmwPC",
+    "name": "WF_Error_Handler",
+    "nodes": [
+      {
+        "id": "f7669526-d472-4994-9a81-3846d8d56d16",
+        "name": "Error Trigger",
+        "type": "n8n-nodes-base.errorTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "bcb6db6f-add7-4a86-aaf0-7fcd3603e2a1",
+        "name": "Build Error Event",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          240,
+          0
+        ],
+        "parameters": {
+          "jsCode": "const err = $json.execution?.error ?? $json.error ?? {};\nconst runId = $json.execution?.id ? String($json.execution.id) : 'unknown';\n\nreturn [{\n  json: {\n    run_id: runId,\n    stage: 'workflow_error',\n    level: 'error',\n    message: err.message ?? 'Unhandled workflow error',\n    payload: {\n      workflow: $json.workflow ?? null,\n      error: err,\n      execution: $json.execution ?? null,\n    },\n    created_at: new Date().toISOString(),\n  },\n}];"
+        }
+      },
+      {
+        "id": "cf79d31c-748a-451d-a609-61470ed7d22a",
+        "name": "Insert Error Log",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          480,
+          -120
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO content_events (run_id, stage, level, message, payload)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.stage}}',\n  '{{$json.level}}',\n  '{{$json.message}}',\n  '{{ JSON.stringify($json.payload).replace(/'/g, \"''\") }}'::jsonb\n);",
+          "options": {}
+        },
+        "continueOnFail": true,
+        "credentials": {
+          "postgres": {
+            "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+            "name": "Local Postgres (n8n)"
+          }
+        }
+      },
+      {
+        "id": "23f06f14-e33d-450f-999d-14513226f560",
+        "name": "Alert Ops Channel",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          480,
+          40
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{$env.ERROR_ALERT_WEBHOOK_URL || \"https://example.com/hooks/workflow-errors\"}}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ { run_id: $json.run_id, stage: $json.stage, level: $json.level, message: $json.message, created_at: $json.created_at } }}",
+          "options": {
+            "timeout": 30000
+          }
+        },
+        "continueOnFail": true
+      }
+    ],
+    "connections": {
+      "Error Trigger": {
+        "main": [
+          [
+            {
+              "node": "Build Error Event",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Error Event": {
+        "main": [
+          [
+            {
+              "node": "Insert Error Log",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Alert Ops Channel",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "saveDataErrorExecution": "all",
+      "saveDataSuccessExecution": "all",
+      "saveExecutionProgress": true,
+      "saveManualExecutions": true,
+      "timezone": "UTC"
+    },
+    "staticData": null,
+    "pinData": {},
+    "active": false,
+    "tags": [],
+    "versionId": "2d328c0b-ecd2-4f6f-ae82-269f713c8bac",
+    "meta": {
+      "templateCredsSetupCompleted": false,
+      "generatedAt": "2026-03-09T04:14:51.808Z"
+    }
+  }
+]

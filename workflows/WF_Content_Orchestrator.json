@@ -1,0 +1,896 @@
+{
+  "id": "Xlc6ZFLdozHji7p7",
+  "name": "WF_Content_Orchestrator",
+  "nodes": [
+    {
+      "id": "be20866f-d15b-442b-91ce-bcafd32b4d58",
+      "name": "Topic Intake",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "content-topic-intake",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "88bf14bf-ff43-4c36-bef5-8ac17d88bbb0"
+    },
+    {
+      "id": "2de9dda8-b2c0-4507-b13a-7f7af7027aaf",
+      "name": "Normalize Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const payload = $json.body ?? $json;\nconst topic = (payload.topic ?? '').toString().trim();\nconst platform = (payload.platform ?? 'devto').toString().toLowerCase();\nconst requester = (payload.requester ?? 'anonymous').toString();\nconst source = (payload.source ?? 'api').toString();\n\nif (!topic) {\n  return [{\n    json: {\n      topic: '',\n      requester,\n      platform,\n      source,\n      idempotency_key: payload.idempotency_key ?? '',\n      status: 'rejected_input',\n      input_guardrail: {\n        allow: false,\n        rules: {\n          allow: false,\n          blocked_terms: ['missing_topic'],\n          reason: 'Topic is required.',\n        },\n        ai: {\n          allow: false,\n          categories: ['invalid_input'],\n          reason: 'Topic is required.',\n          confidence: 1,\n        },\n      },\n      response: {\n        status: 'rejected_input',\n        message: 'Topic is required.',\n      },\n    },\n  }];\n}\n\nconst normalizedTopic = topic.replace(/\\s+/g, ' ').trim();\nconst slugBase = normalizedTopic.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);\nconst idempotencyKey = (payload.idempotency_key ?? (slugBase + '-' + Date.now())).toString();\n\nreturn [{\n  json: {\n    topic: normalizedTopic,\n    requester,\n    platform,\n    source,\n    idempotency_key: idempotencyKey,\n  },\n}];"
+      }
+    },
+    {
+      "id": "1cf7eca7-dee3-4515-9e33-959d58b5edf6",
+      "name": "Init Run State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const now = new Date().toISOString();\nconst random = Math.random().toString(36).slice(2, 10);\nconst runId = Date.now() + '-' + random;\n\nreturn [{\n  json: {\n    run_id: runId,\n    status: $json.status ?? 'received',\n    topic: $json.topic,\n    title: '',\n    summary: '',\n    requester: $json.requester,\n    source: $json.source,\n    platform: $json.platform,\n    idempotency_key: $json.idempotency_key,\n    research: {\n      notes: [],\n      sources: [],\n      citations: [],\n      gaps: [],\n      confidence: 'unknown',\n    },\n    sections: [],\n    markdown_content: '',\n    review: {\n      quality_score: 0,\n      strengths: [],\n      feedback: [],\n      missing_sections: [],\n      policy_violations: [],\n      hallucination_risk: 'unknown',\n      recommended_action: 'revise',\n    },\n    approval: {\n      status: 'not_requested',\n      approver: '',\n      channel: 'slack',\n      comments: '',\n      decided_at: '',\n      token: '',\n      callback_url: '',\n    },\n    publish: {\n      status: 'not_started',\n      platform: $json.platform,\n      url: '',\n      article_id: '',\n      published_at: '',\n      provider_response: {},\n    },\n    input_guardrail: {\n      allow: true,\n      rules: null,\n      ai: null,\n    },\n    output_guardrail: {\n      guardrail_pass: false,\n      violations: [],\n      risk_level: 'unknown',\n      hallucination_risk: 'unknown',\n      missing_required_sections: [],\n      action: 'revise',\n    },\n    supervisor: {\n      next_action: 'RUN_RESEARCH',\n      reason: 'Initial state',\n      required_updates: [],\n      priority: 'normal',\n      retryable: true,\n      decided_at: now,\n    },\n    revision_count: 0,\n    max_revision_attempts: 2,\n    cost_metrics: {\n      prompt_tokens: 0,\n      completion_tokens: 0,\n      estimated_usd: 0,\n    },\n    timestamps: {\n      created_at: now,\n      updated_at: now,\n      started_at: now,\n      finished_at: '',\n    },\n  },\n}];"
+      }
+    },
+    {
+      "id": "2ed602ed-b5c7-4fcf-acb0-3796f7a4c760",
+      "name": "Persist Run Created",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        720,
+        -120
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO content_runs (run_id, status, topic, idempotency_key, state, updated_at)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.status}}',\n  '{{$json.topic}}',\n  '{{ $json.idempotency_key || \"\" }}',\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (run_id)\nDO UPDATE SET\n  status = EXCLUDED.status,\n  topic = EXCLUDED.topic,\n  idempotency_key = EXCLUDED.idempotency_key,\n  state = EXCLUDED.state,\n  updated_at = NOW();",
+        "options": {}
+      },
+      "continueOnFail": true,
+      "notes": "Configure Postgres credentials before production use.",
+      "notesInFlow": true,
+      "credentials": {
+        "postgres": {
+          "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+          "name": "Local Postgres (n8n)"
+        }
+      }
+    },
+    {
+      "id": "da6e6edb-eb34-4078-8554-8ae538173346",
+      "name": "Input Rule Guardrail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        40
+      ],
+      "parameters": {
+        "jsCode": "const topic = ($json.topic ?? '').toLowerCase();\nconst blockedPatterns = [\n  { key: 'malware_generation', re: /\\b(malware|ransomware|keylogger|botnet|trojan builder)\\b/ },\n  { key: 'illegal_hacking', re: /\\b(exploit zero day|bypass firewall|credential stuffing|phishing kit|sql injection payload)\\b/ },\n  { key: 'fake_medical_advice', re: /\\b(fake medical|fabricate diagnosis|unsafe dosage|pretend doctor advice)\\b/ },\n  { key: 'plagiarism_request', re: /\\b(plagiarize|copy exact article|rewrite this to avoid plagiarism checker)\\b/ },\n];\n\nconst hits = blockedPatterns.filter((p) => p.re.test(topic)).map((p) => p.key);\nconst allow = hits.length === 0;\n\n$json.input_guardrail = {\n  ...($json.input_guardrail ?? {}),\n  rules: {\n    allow,\n    blocked_terms: hits,\n    reason: allow ? 'No blocked input patterns detected.' : 'Blocked by deterministic input rules.',\n  },\n};\n\nif (!allow) {\n  $json.status = 'rejected_input';\n}\n$json.timestamps.updated_at = new Date().toISOString();\n\nreturn [{ json: $json }];"
+      }
+    },
+    {
+      "id": "1dc403d8-172a-4482-b984-393d66b5f906",
+      "name": "Input AI Guardrail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        40
+      ],
+      "parameters": {
+        "jsCode": "const topic = ($json.topic ?? '').toLowerCase();\nlet allow = true;\nlet reason = 'No high-risk intent detected.';\nconst categories = [];\nlet confidence = 0.82;\n\nif (/\\b(generate exploit|undetectable malware|steal credentials|bank account takeover)\\b/.test(topic)) {\n  allow = false;\n  categories.push('cyber_abuse');\n  reason = 'High-risk cyber abuse intent detected.';\n  confidence = 0.98;\n}\nif (/\\b(prescribe medication without doctor|fake medical treatment)\\b/.test(topic)) {\n  allow = false;\n  categories.push('unsafe_medical');\n  reason = 'Unsafe medical request detected.';\n  confidence = 0.95;\n}\nif (/\\b(copy this article exactly|pass ai detector plagiarism)\\b/.test(topic)) {\n  allow = false;\n  categories.push('plagiarism');\n  reason = 'Plagiarism-like intent detected.';\n  confidence = 0.94;\n}\n\nconst ruleAllow = $json.input_guardrail?.rules?.allow ?? true;\n\n$json.input_guardrail = {\n  ...($json.input_guardrail ?? {}),\n  allow: Boolean(ruleAllow && allow),\n  ai: {\n    allow,\n    categories,\n    reason,\n    confidence,\n  },\n};\n\nif (!$json.input_guardrail.allow) {\n  $json.status = 'rejected_input';\n  $json.response = {\n    status: 'rejected_input',\n    run_id: $json.run_id,\n    message: 'Topic blocked by guardrails.',\n    categories: [\n      ...($json.input_guardrail.rules?.blocked_terms ?? []),\n      ...($json.input_guardrail.ai?.categories ?? []),\n    ],\n  };\n}\n\n$json.timestamps.updated_at = new Date().toISOString();\nreturn [{ json: $json }];"
+      }
+    },
+    {
+      "id": "5739724d-7a83-4d38-8ca5-d2f5aaedc6e7",
+      "name": "Input Allowed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        40
+      ],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.input_guardrail.allow}}",
+              "value2": true,
+              "operation": "equal"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "3866b8be-1547-4c7a-9a44-737744f3c0af",
+      "name": "Supervisor Decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        40
+      ],
+      "parameters": {
+        "jsCode": "const review = $json.review ?? {};\nconst approval = $json.approval ?? {};\nconst publish = $json.publish ?? {};\n\nlet nextAction = 'RUN_RESEARCH';\nlet reason = 'Research notes missing.';\n\nif ($json.input_guardrail?.allow === false || String($json.status || '').startsWith('rejected')) {\n  nextAction = 'REJECT_TOPIC';\n  reason = 'Input guardrail failed.';\n} else if (!Array.isArray($json.research?.notes) || $json.research.notes.length === 0) {\n  nextAction = 'RUN_RESEARCH';\n  reason = 'Research is required before writing.';\n} else if (!$json.markdown_content || !$json.markdown_content.trim()) {\n  nextAction = 'RUN_WRITING';\n  reason = 'Draft content missing.';\n} else if (!review.quality_score) {\n  nextAction = 'RUN_REVIEW';\n  reason = 'Draft not reviewed yet.';\n} else if (\n  (review.quality_score ?? 0) < 80 ||\n  (review.policy_violations ?? []).length > 0 ||\n  review.hallucination_risk === 'high' ||\n  $json.output_guardrail?.guardrail_pass === false\n) {\n  if (($json.revision_count ?? 0) >= ($json.max_revision_attempts ?? 2)) {\n    nextAction = 'END_FAILED';\n    reason = 'Max revision attempts reached.';\n  } else {\n    nextAction = 'REQUEST_REVISION';\n    reason = 'Quality or policy checks require revision.';\n  }\n} else if (approval.status === 'approved' && publish.status !== 'published') {\n  nextAction = 'PUBLISH';\n  reason = 'Approved for publishing.';\n} else if (approval.status === 'rejected') {\n  nextAction = 'END_REJECTED';\n  reason = 'Human approval rejected the content.';\n} else if (publish.status === 'published') {\n  nextAction = 'END_SUCCESS';\n  reason = 'Publishing complete.';\n} else {\n  nextAction = 'SEND_HUMAN_APPROVAL';\n  reason = 'Awaiting human approval.';\n}\n\n$json.supervisor = {\n  next_action: nextAction,\n  reason,\n  required_updates: [],\n  priority: 'normal',\n  retryable: true,\n  decided_at: new Date().toISOString(),\n};\n\n$json.timestamps.updated_at = new Date().toISOString();\nreturn [{ json: $json }];"
+      }
+    },
+    {
+      "id": "0ed25621-d9be-4201-a18e-611f56686690",
+      "name": "Route Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        40
+      ],
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{$json.supervisor.next_action}}",
+        "rules": {
+          "rules": [
+            {
+              "operation": "equal",
+              "value2": "RUN_RESEARCH",
+              "outputKey": "0"
+            },
+            {
+              "operation": "equal",
+              "value2": "RUN_WRITING",
+              "outputKey": "1"
+            },
+            {
+              "operation": "equal",
+              "value2": "RUN_REVIEW",
+              "outputKey": "2"
+            },
+            {
+              "operation": "equal",
+              "value2": "REQUEST_REVISION",
+              "outputKey": "3"
+            },
+            {
+              "operation": "equal",
+              "value2": "SEND_HUMAN_APPROVAL",
+              "outputKey": "4"
+            },
+            {
+              "operation": "equal",
+              "value2": "PUBLISH",
+              "outputKey": "5"
+            },
+            {
+              "operation": "equal",
+              "value2": "REJECT_TOPIC",
+              "outputKey": "6"
+            },
+            {
+              "operation": "equal",
+              "value2": "END_REJECTED",
+              "outputKey": "7"
+            },
+            {
+              "operation": "equal",
+              "value2": "END_SUCCESS",
+              "outputKey": "8"
+            },
+            {
+              "operation": "equal",
+              "value2": "END_FAILED",
+              "outputKey": "9"
+            }
+          ]
+        },
+        "mode": "rules",
+        "options": {
+          "fallbackOutput": 6
+        }
+      }
+    },
+    {
+      "id": "10b6b0c6-ef9c-44c0-b8a4-f16c590fb733",
+      "name": "Run Research",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        -220
+      ],
+      "parameters": {
+        "workflowId": "={{$env.WF_RESEARCH_ID}}",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "notes": "Set WF_RESEARCH_ID in n8n environment or switch to static workflow ID.",
+      "notesInFlow": true
+    },
+    {
+      "id": "1a52327a-2329-412c-8636-dedb980ddace",
+      "name": "Persist After Research",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2160,
+        -300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO content_runs (run_id, status, topic, idempotency_key, state, updated_at)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.status}}',\n  '{{$json.topic}}',\n  '{{ $json.idempotency_key || \"\" }}',\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (run_id)\nDO UPDATE SET\n  status = EXCLUDED.status,\n  topic = EXCLUDED.topic,\n  idempotency_key = EXCLUDED.idempotency_key,\n  state = EXCLUDED.state,\n  updated_at = NOW();",
+        "options": {}
+      },
+      "continueOnFail": true,
+      "credentials": {
+        "postgres": {
+          "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+          "name": "Local Postgres (n8n)"
+        }
+      }
+    },
+    {
+      "id": "b2fb9522-4e59-44fe-baba-26245a1d787d",
+      "name": "Run Writing",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        -60
+      ],
+      "parameters": {
+        "workflowId": "={{$env.WF_WRITING_ID}}",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "notes": "Set WF_WRITING_ID in n8n environment or switch to static workflow ID.",
+      "notesInFlow": true
+    },
+    {
+      "id": "3189973a-1e33-4cec-b6d5-085bcab91e3e",
+      "name": "Persist After Writing",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2160,
+        -120
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO content_runs (run_id, status, topic, idempotency_key, state, updated_at)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.status}}',\n  '{{$json.topic}}',\n  '{{ $json.idempotency_key || \"\" }}',\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (run_id)\nDO UPDATE SET\n  status = EXCLUDED.status,\n  topic = EXCLUDED.topic,\n  idempotency_key = EXCLUDED.idempotency_key,\n  state = EXCLUDED.state,\n  updated_at = NOW();",
+        "options": {}
+      },
+      "continueOnFail": true,
+      "credentials": {
+        "postgres": {
+          "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+          "name": "Local Postgres (n8n)"
+        }
+      }
+    },
+    {
+      "id": "cc35c834-5156-45dc-a99a-7ccff6dbc430",
+      "name": "Run Review",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        100
+      ],
+      "parameters": {
+        "workflowId": "={{$env.WF_REVIEW_ID}}",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "notes": "Set WF_REVIEW_ID in n8n environment or switch to static workflow ID.",
+      "notesInFlow": true
+    },
+    {
+      "id": "786f6613-347d-433d-88a9-e1bc64242c64",
+      "name": "Output Rule Guardrail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const content = ($json.markdown_content ?? '').trim();\nconst headings = [...content.matchAll(/^##?\\s+(.+)$/gm)].map((m) => m[1]);\nconst wordCount = content ? content.split(/\\s+/).length : 0;\nconst hasIntro = /(^|\\n)#\\s+/.test(content) || /introduction/i.test(content);\nconst hasConclusion = /conclusion/i.test(content);\n\nconst missing = [];\nif (wordCount < 600) missing.push('minimum_word_count_600');\nif (!hasIntro) missing.push('missing_intro');\nif (!hasConclusion) missing.push('missing_conclusion');\nif (headings.length < 4) missing.push('minimum_4_headings');\n\n$json.output_guardrail = {\n  ...($json.output_guardrail ?? {}),\n  rule_checks: {\n    word_count: wordCount,\n    heading_count: headings.length,\n    has_intro: hasIntro,\n    has_conclusion: hasConclusion,\n  },\n  missing_required_sections: missing,\n};\n\nreturn [{ json: $json }];"
+      }
+    },
+    {
+      "id": "4eb3509c-41bb-44c8-a8f6-6eec13c34dce",
+      "name": "Output AI Guardrail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        100
+      ],
+      "parameters": {
+        "jsCode": "const review = $json.review ?? {};\nconst missing = $json.output_guardrail?.missing_required_sections ?? [];\nconst policyViolations = review.policy_violations ?? [];\nconst lowQuality = (review.quality_score ?? 0) < 80;\nconst highHallucination = review.hallucination_risk === 'high';\n\nlet guardrailPass = true;\nconst violations = [];\nif (policyViolations.length > 0) {\n  guardrailPass = false;\n  violations.push(...policyViolations);\n}\nif (missing.length > 0) {\n  guardrailPass = false;\n  violations.push('missing_required_sections');\n}\nif (lowQuality) {\n  guardrailPass = false;\n  violations.push('low_quality_score');\n}\nif (highHallucination) {\n  guardrailPass = false;\n  violations.push('high_hallucination_risk');\n}\n\n$json.output_guardrail = {\n  ...($json.output_guardrail ?? {}),\n  guardrail_pass: guardrailPass,\n  violations,\n  risk_level: highHallucination ? 'high' : (lowQuality ? 'medium' : 'low'),\n  hallucination_risk: review.hallucination_risk ?? 'unknown',\n  action: guardrailPass ? 'pass' : 'revise',\n};\n\nreturn [{ json: $json }];"
+      }
+    },
+    {
+      "id": "21855d13-ca97-46a4-a9cf-900fbb2ffc86",
+      "name": "Quality Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.output_guardrail.guardrail_pass}}",
+              "value2": true,
+              "operation": "equal"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "f629fca7-6961-498a-ba77-7f5f2661b42f",
+      "name": "Revision Counter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        180
+      ],
+      "parameters": {
+        "jsCode": "$json.revision_count = Number($json.revision_count ?? 0) + 1;\n$json.status = 'revision_requested';\n$json.timestamps.updated_at = new Date().toISOString();\n\nif ($json.revision_count > ($json.max_revision_attempts ?? 2)) {\n  $json.status = 'failed';\n  $json.supervisor = {\n    ...($json.supervisor ?? {}),\n    next_action: 'END_FAILED',\n    reason: 'Max revisions exceeded.',\n    decided_at: new Date().toISOString(),\n  };\n}\n\nreturn [{ json: $json }];"
+      }
+    },
+    {
+      "id": "721d2b36-f7ba-41a4-812d-6bca35f35fa8",
+      "name": "Need Human Approval",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        260
+      ],
+      "parameters": {
+        "workflowId": "={{$env.WF_APPROVAL_ID}}",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "notes": "Set WF_APPROVAL_ID in n8n environment or switch to static workflow ID.",
+      "notesInFlow": true
+    },
+    {
+      "id": "7f773920-2eb0-4af3-b495-f7bbcf2d9618",
+      "name": "Approval Decision",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        260
+      ],
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{$json.approval.status}}",
+        "rules": {
+          "rules": [
+            {
+              "operation": "equal",
+              "value2": "approved",
+              "outputKey": "0"
+            },
+            {
+              "operation": "equal",
+              "value2": "rejected",
+              "outputKey": "1"
+            },
+            {
+              "operation": "equal",
+              "value2": "pending",
+              "outputKey": "2"
+            }
+          ]
+        },
+        "mode": "rules",
+        "options": {
+          "fallbackOutput": 2
+        }
+      }
+    },
+    {
+      "id": "0eaa9d6f-dee8-49c6-93f9-4244adbb7dc0",
+      "name": "Run Publish",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        420
+      ],
+      "parameters": {
+        "workflowId": "={{$env.WF_PUBLISH_ID}}",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "notes": "Set WF_PUBLISH_ID in n8n environment or switch to static workflow ID.",
+      "notesInFlow": true
+    },
+    {
+      "id": "3cb459b7-0d81-431f-81dc-a7520a9d6db7",
+      "name": "Persist Final State",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2160,
+        520
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO content_runs (run_id, status, topic, idempotency_key, state, updated_at)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.status}}',\n  '{{$json.topic}}',\n  '{{ $json.idempotency_key || \"\" }}',\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (run_id)\nDO UPDATE SET\n  status = EXCLUDED.status,\n  topic = EXCLUDED.topic,\n  idempotency_key = EXCLUDED.idempotency_key,\n  state = EXCLUDED.state,\n  updated_at = NOW();",
+        "options": {}
+      },
+      "continueOnFail": true,
+      "credentials": {
+        "postgres": {
+          "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+          "name": "Local Postgres (n8n)"
+        }
+      }
+    },
+    {
+      "id": "88161bd7-d539-4163-ab6d-adc24ecb7e12",
+      "name": "Notify Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2400,
+        420
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.NOTIFICATION_WEBHOOK_URL || \"https://example.com/hooks/content-status\"}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { run_id: $json.run_id, status: $json.status, topic: $json.topic, approval_status: $json.approval?.status, publish_status: $json.publish?.status, published_url: $json.publish?.url || null, updated_at: new Date().toISOString() } }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "ee03020c-c1c9-4ecc-9cba-9212594ac3e9",
+      "name": "Return API Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        420
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response || { run_id: $json.run_id, status: $json.status, topic: $json.topic, title: $json.title, approval_status: $json.approval?.status, publish_status: $json.publish?.status, published_url: $json.publish?.url || null, revision_count: $json.revision_count, updated_at: $json.timestamps?.updated_at } }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Topic Intake": {
+      "main": [
+        [
+          {
+            "node": "Normalize Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Input": {
+      "main": [
+        [
+          {
+            "node": "Init Run State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Init Run State": {
+      "main": [
+        [
+          {
+            "node": "Persist Run Created",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Input Rule Guardrail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input Rule Guardrail": {
+      "main": [
+        [
+          {
+            "node": "Input AI Guardrail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input AI Guardrail": {
+      "main": [
+        [
+          {
+            "node": "Input Allowed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input Allowed?": {
+      "main": [
+        [
+          {
+            "node": "Supervisor Decision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persist Final State",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify Result",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Return API Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supervisor Decision": {
+      "main": [
+        [
+          {
+            "node": "Route Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Action": {
+      "main": [
+        [
+          {
+            "node": "Run Research",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Run Writing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Run Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Revision Counter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Need Human Approval",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Run Publish",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persist Final State",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify Result",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Return API Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persist Final State",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify Result",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Return API Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persist Final State",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify Result",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Return API Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persist Final State",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify Result",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Return API Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Research": {
+      "main": [
+        [
+          {
+            "node": "Persist After Research",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Supervisor Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Writing": {
+      "main": [
+        [
+          {
+            "node": "Persist After Writing",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Supervisor Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Review": {
+      "main": [
+        [
+          {
+            "node": "Output Rule Guardrail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Output Rule Guardrail": {
+      "main": [
+        [
+          {
+            "node": "Output AI Guardrail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Output AI Guardrail": {
+      "main": [
+        [
+          {
+            "node": "Quality Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quality Gate": {
+      "main": [
+        [
+          {
+            "node": "Supervisor Decision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Revision Counter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Revision Counter": {
+      "main": [
+        [
+          {
+            "node": "Supervisor Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Need Human Approval": {
+      "main": [
+        [
+          {
+            "node": "Approval Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approval Decision": {
+      "main": [
+        [
+          {
+            "node": "Supervisor Decision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persist Final State",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify Result",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Return API Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Need Human Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Publish": {
+      "main": [
+        [
+          {
+            "node": "Persist Final State",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify Result",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Return API Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "timezone": "UTC"
+  },
+  "staticData": null,
+  "pinData": {},
+  "active": false,
+  "tags": [],
+  "versionId": "04428ee4-9953-4665-8578-7ba2de3af2cb",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "generatedAt": "2026-03-09T04:14:51.808Z"
+  }
+}

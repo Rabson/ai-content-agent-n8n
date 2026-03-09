@@ -1,0 +1,308 @@
+{
+  "id": "wBncL3VOpQEd9Zwz",
+  "name": "WF_Publish",
+  "nodes": [
+    {
+      "id": "77e10b64-4362-457b-b134-4785a07bb9bd",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "cd7f3a7a-dacf-44ef-94b7-07959e66b37a",
+      "name": "Platform Route",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{($json.platform || $json.publish?.platform || \"devto\").toLowerCase()}}",
+        "rules": {
+          "rules": [
+            {
+              "operation": "equal",
+              "value2": "devto",
+              "outputKey": "0"
+            },
+            {
+              "operation": "equal",
+              "value2": "hashnode",
+              "outputKey": "1"
+            },
+            {
+              "operation": "equal",
+              "value2": "ghost",
+              "outputKey": "2"
+            }
+          ]
+        },
+        "mode": "rules",
+        "options": {
+          "fallbackOutput": 0
+        }
+      }
+    },
+    {
+      "id": "4a48b22f-2f8b-431a-9e4f-2d5f5c73433c",
+      "name": "Publish to Dev.to",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        -120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.DEVTO_API_URL || \"https://dev.to/api/articles\"}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "api-key",
+              "value": "={{$env.DEVTO_API_KEY || \"\"}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { article: { title: $json.title, published: true, body_markdown: $json.markdown_content, tags: [\"oauth\",\"security\",\"sso\"] } } }}",
+        "options": {
+          "timeout": 45000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "5d0756f1-6ea6-43cb-97bb-2544a58a0038",
+      "name": "Publish to Hashnode",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.HASHNODE_API_URL || \"https://gql.hashnode.com\"}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{$env.HASHNODE_API_KEY ? `Bearer ${$env.HASHNODE_API_KEY}` : \"\"}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { query: \"mutation PublishPost($input: PublishPostInput!) { publishPost(input: $input) { post { id url } } }\", variables: { input: { title: $json.title, contentMarkdown: $json.markdown_content, publicationId: $env.HASHNODE_PUBLICATION_ID || \"\" } } } }}",
+        "options": {
+          "timeout": 45000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "f728a161-f50d-446a-a7d3-4fb90ba3a141",
+      "name": "Publish to Ghost",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.GHOST_API_URL || \"https://your-ghost-site/ghost/api/admin/posts/?source=html\"}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{`Ghost ${$env.GHOST_ADMIN_TOKEN || \"\"}`}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { posts: [{ title: $json.title, html: $json.markdown_content, status: \"published\" }] } }}",
+        "options": {
+          "timeout": 45000
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "54f9a615-44c9-4641-a196-c313808944d7",
+      "name": "Normalize publish response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const state = $items('Execute Workflow Trigger', 0, 0)[0].json;\nlet response = $json;\n\n// Detect which node produced this payload.\nconst fromDevto = typeof response?.id !== 'undefined' && typeof response?.url === 'string';\nconst fromHashnode = response?.data?.publishPost?.post;\nconst fromGhost = response?.posts?.[0];\n\nlet url = '';\nlet articleId = '';\nlet status = 'publish_failed';\n\nif (fromDevto) {\n  url = response.url ?? '';\n  articleId = String(response.id ?? '');\n  status = url ? 'published' : 'publish_failed';\n} else if (fromHashnode) {\n  url = fromHashnode.url ?? '';\n  articleId = String(fromHashnode.id ?? '');\n  status = url ? 'published' : 'publish_failed';\n} else if (fromGhost) {\n  url = fromGhost.url ?? '';\n  articleId = String(fromGhost.id ?? '');\n  status = articleId ? 'published' : 'publish_failed';\n}\n\nconst merged = {\n  ...state,\n  status: status === 'published' ? 'published' : 'publish_failed',\n  publish: {\n    ...(state.publish ?? {}),\n    status,\n    platform: state.platform ?? state.publish?.platform ?? 'devto',\n    url,\n    article_id: articleId,\n    published_at: status === 'published' ? new Date().toISOString() : '',\n    provider_response: response,\n  },\n};\n\nmerged.timestamps = {\n  ...(merged.timestamps ?? {}),\n  updated_at: new Date().toISOString(),\n  finished_at: status === 'published' ? new Date().toISOString() : merged.timestamps?.finished_at ?? '',\n};\n\nreturn [{ json: merged }];"
+      }
+    },
+    {
+      "id": "1af70b47-f095-4328-8040-c455044fea11",
+      "name": "Persist publish",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        960,
+        -120
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO content_runs (run_id, status, topic, idempotency_key, state, updated_at)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.status}}',\n  '{{$json.topic}}',\n  '{{ $json.idempotency_key || \"\" }}',\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (run_id)\nDO UPDATE SET\n  status = EXCLUDED.status,\n  topic = EXCLUDED.topic,\n  idempotency_key = EXCLUDED.idempotency_key,\n  state = EXCLUDED.state,\n  updated_at = NOW();",
+        "options": {}
+      },
+      "continueOnFail": true,
+      "credentials": {
+        "postgres": {
+          "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+          "name": "Local Postgres (n8n)"
+        }
+      }
+    },
+    {
+      "id": "30f84190-0e63-481f-b003-9362a0222958",
+      "name": "Return Published State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        40
+      ],
+      "parameters": {
+        "jsCode": "return items;"
+      }
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Platform Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Platform Route": {
+      "main": [
+        [
+          {
+            "node": "Publish to Dev.to",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Publish to Hashnode",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Publish to Ghost",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish to Dev.to": {
+      "main": [
+        [
+          {
+            "node": "Normalize publish response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish to Hashnode": {
+      "main": [
+        [
+          {
+            "node": "Normalize publish response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish to Ghost": {
+      "main": [
+        [
+          {
+            "node": "Normalize publish response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize publish response": {
+      "main": [
+        [
+          {
+            "node": "Persist publish",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Return Published State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "timezone": "UTC"
+  },
+  "staticData": null,
+  "pinData": {},
+  "active": false,
+  "tags": [],
+  "versionId": "dafc0bae-005e-46f9-adfc-1702dbf81609",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "generatedAt": "2026-03-09T04:14:51.808Z"
+  }
+}
