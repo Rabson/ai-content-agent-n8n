@@ -112,7 +112,7 @@
       "credentials": {
         "postgres": {
           "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
-          "name": "Local Postgres (n8n)"
+          "name": "External Postgres (n8n)"
         }
       }
     },

@@ -15,8 +15,8 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
-        0,
-        0
+        16,
+        -240
       ],
       "webhookId": "841a1a7d-2672-4dd1-878b-0be0402b2893"
     },
@@ -30,7 +30,7 @@
       "typeVersion": 2,
       "position": [
         240,
-        0
+        -240
       ]
     },
     {
@@ -55,8 +55,8 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 2,
       "position": [
-        480,
-        0
+        464,
+        -240
       ]
     },
     {
@@ -88,8 +88,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        720,
-        128
+        688,
+        -176
       ],
       "continueOnFail": true
     },
@@ -102,8 +102,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        960,
-        128
+        912,
+        -176
       ]
     },
     {
@@ -115,8 +115,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1200,
-        0
+        1136,
+        -240
       ]
     },
     {
@@ -135,8 +135,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
       "position": [
-        1440,
-        0
+        1360,
+        -240
       ]
     },
     {
@@ -150,13 +150,13 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        1680,
-        -160
+        1584,
+        -432
       ],
       "credentials": {
         "postgres": {
           "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
-          "name": "Local Postgres (n8n)"
+          "name": "External Postgres (n8n)"
         }
       },
       "continueOnFail": true
@@ -186,8 +186,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1920,
-        -160
+        1584,
+        -256
       ],
       "continueOnFail": true
     },
@@ -220,8 +220,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2160,
-        -160
+        1808,
+        -256
       ],
       "continueOnFail": true
     },
@@ -234,8 +234,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2400,
-        -160
+        2032,
+        -256
       ]
     },
     {
@@ -267,8 +267,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2640,
-        -160
+        2256,
+        -256
       ],
       "continueOnFail": true
     },
@@ -281,8 +281,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2880,
-        -160
+        2480,
+        -256
       ]
     },
     {
@@ -301,8 +301,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
       "position": [
-        3120,
-        -160
+        2704,
+        -256
       ]
     },
     {
@@ -314,8 +314,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3328,
-        -64
+        3552,
+        -48
       ]
     },
     {
@@ -347,8 +347,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3344,
-        -400
+        2880,
+        -432
       ],
       "continueOnFail": true
     },
@@ -361,8 +361,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3552,
-        -400
+        3104,
+        -432
       ]
     },
     {
@@ -394,8 +394,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3808,
-        -560
+        3328,
+        -624
       ],
       "continueOnFail": true
     },
@@ -408,8 +408,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4160,
-        -560
+        3552,
+        -624
       ]
     },
     {
@@ -421,8 +421,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4176,
-        -400
+        3552,
+        -432
       ]
     },
     {
@@ -454,8 +454,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3808,
-        -224
+        3328,
+        -240
       ],
       "continueOnFail": true
     },
@@ -468,8 +468,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4160,
-        -224
+        3552,
+        -240
       ]
     },
     {
@@ -481,8 +481,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3344,
-        112
+        3552,
+        144
       ]
     },
     {
@@ -496,13 +496,13 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        4880,
-        -192
+        3776,
+        -224
       ],
       "credentials": {
         "postgres": {
           "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
-          "name": "Local Postgres (n8n)"
+          "name": "External Postgres (n8n)"
         }
       },
       "continueOnFail": true
@@ -518,8 +518,8 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [
-        5136,
-        -96
+        4000,
+        -64
       ]
     },
     {
@@ -529,8 +529,8 @@
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
       "position": [
-        3376,
-        1088
+        16,
+        464
       ]
     },
     {
@@ -542,8 +542,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3616,
-        1088
+        240,
+        464
       ]
     },
     {
@@ -557,13 +557,13 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        3856,
-        960
+        464,
+        368
       ],
       "credentials": {
         "postgres": {
           "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
-          "name": "Local Postgres (n8n)"
+          "name": "External Postgres (n8n)"
         }
       },
       "continueOnFail": true
@@ -593,8 +593,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3856,
-        1136
+        464,
+        560
       ],
       "continueOnFail": true
     },
@@ -627,8 +627,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3808,
-        -400
+        3328,
+        -432
       ],
       "continueOnFail": true
     }
@@ -985,6 +985,6 @@
     "templateCredsSetupCompleted": false
   },
   "pinData": {},
-  "versionId": "14a4a583-185f-4964-be34-8f6c7ba3c047",
+  "versionId": "2e46a706-73ab-4671-84c4-6d113397173e",
   "tags": []
 }

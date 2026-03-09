@@ -9,7 +9,7 @@ const nowIso = new Date().toISOString();
 const WORKFLOW_ID = 'Xlc6ZFLdozHji7p7';
 const WORKFLOW_NAME = 'WF_Content_Orchestrator';
 const POSTGRES_CREDENTIAL_ID = 'f3dc8f0f-1f70-47f5-bf25-10b0d2e55111';
-const POSTGRES_CREDENTIAL_NAME = 'Local Postgres (n8n)';
+const POSTGRES_CREDENTIAL_NAME = 'External Postgres (n8n)';
 
 function n({
   name,
