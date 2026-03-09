@@ -2,8 +2,15 @@
   {
     "id": "Xlc6ZFLdozHji7p7",
     "name": "WF_Content_Orchestrator",
+    "active": true,
     "nodes": [
       {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "content-topic-intake",
+          "responseMode": "responseNode",
+          "options": {}
+        },
         "id": "219cf22b-47ee-4aed-a7dd-53f50d43b181",
         "name": "Topic Intake",
         "type": "n8n-nodes-base.webhook",
@@ -12,15 +19,12 @@
           0,
           0
         ],
-        "parameters": {
-          "httpMethod": "POST",
-          "path": "content-topic-intake",
-          "responseMode": "responseNode",
-          "options": {}
-        },
         "webhookId": "841a1a7d-2672-4dd1-878b-0be0402b2893"
       },
       {
+        "parameters": {
+          "jsCode": "const payload = $json.body ?? $json;\nconst manualTopic = (payload.topic ?? '').toString().trim();\nconst modeRaw = (payload.discovery_mode ?? (manualTopic ? 'manual' : 'api')).toString().toLowerCase();\nconst mode = modeRaw === 'api' ? 'api' : 'manual';\nconst requester = (payload.requester ?? 'single_user').toString();\nconst source = (payload.source ?? 'api').toString();\nconst discoveryQuery = (payload.discovery_query ?? manualTopic ?? 'authentication and identity').toString().trim();\nconst now = new Date().toISOString();\nconst runId = Date.now() + '-' + Math.random().toString(36).slice(2, 10);\n\nconst state = {\n  run_id: runId,\n  idempotency_key: (payload.idempotency_key ?? ('run-' + runId)).toString(),\n  status: 'discovery_ready',\n  requester,\n  source,\n  topic: '',\n  title: '',\n  summary: '',\n  markdown_content: '',\n  discovery: {\n    mode,\n    query: discoveryQuery,\n    third_party_provider: (payload.third_party_provider ?? 'tavily').toString(),\n    topic_candidates: [],\n    scored_topics: [],\n    blocked_topics: [],\n    selected_topic: '',\n    selected_score: 0,\n  },\n  research: {\n    notes: [],\n    sources: [],\n    citations: [],\n    confidence: 'unknown',\n  },\n  review: {\n    approved: false,\n    score: 0,\n    rationale: '',\n    risks: [],\n    improvements: [],\n  },\n  publish: {\n    devto: { status: 'not_started', url: '', article_id: '', provider_response: {} },\n    medium: { status: 'not_started', url: '', article_id: '', provider_response: {} },\n  },\n  linkedin: {\n    summary: '',\n    hashtags: [],\n  },\n  response: {},\n  timestamps: {\n    created_at: now,\n    updated_at: now,\n    finished_at: '',\n  },\n};\n\nif (mode === 'manual') {\n  if (!manualTopic) {\n    state.status = 'rejected_input';\n    state.response = {\n      run_id: state.run_id,\n      status: state.status,\n      message: 'When discovery_mode=manual, topic is required.',\n    };\n    state.timestamps.finished_at = now;\n  } else {\n    const normalized = manualTopic.replace(/\\s+/g, ' ').trim();\n    state.discovery.topic_candidates = [\n      {\n        topic: normalized,\n        source: 'manual',\n        reason: 'Provided directly by user.',\n      },\n    ];\n  }\n}\n\nreturn [{ json: state }];"
+        },
         "id": "911ad62f-ddde-4c58-8f9b-177fa3d3944d",
         "name": "Normalize Discovery Input",
         "type": "n8n-nodes-base.code",
@@ -28,12 +32,25 @@
         "position": [
           240,
           0
-        ],
-        "parameters": {
-          "jsCode": "const payload = $json.body ?? $json;\nconst manualTopic = (payload.topic ?? '').toString().trim();\nconst modeRaw = (payload.discovery_mode ?? (manualTopic ? 'manual' : 'api')).toString().toLowerCase();\nconst mode = modeRaw === 'api' ? 'api' : 'manual';\nconst requester = (payload.requester ?? 'single_user').toString();\nconst source = (payload.source ?? 'api').toString();\nconst discoveryQuery = (payload.discovery_query ?? manualTopic ?? 'authentication and identity').toString().trim();\nconst now = new Date().toISOString();\nconst runId = Date.now() + '-' + Math.random().toString(36).slice(2, 10);\n\nconst state = {\n  run_id: runId,\n  idempotency_key: (payload.idempotency_key ?? ('run-' + runId)).toString(),\n  status: 'discovery_ready',\n  requester,\n  source,\n  topic: '',\n  title: '',\n  summary: '',\n  markdown_content: '',\n  discovery: {\n    mode,\n    query: discoveryQuery,\n    third_party_provider: (payload.third_party_provider ?? 'tavily').toString(),\n    topic_candidates: [],\n    scored_topics: [],\n    blocked_topics: [],\n    selected_topic: '',\n    selected_score: 0,\n  },\n  research: {\n    notes: [],\n    sources: [],\n    citations: [],\n    confidence: 'unknown',\n  },\n  review: {\n    approved: false,\n    score: 0,\n    rationale: '',\n    risks: [],\n    improvements: [],\n  },\n  publish: {\n    devto: { status: 'not_started', url: '', article_id: '', provider_response: {} },\n    medium: { status: 'not_started', url: '', article_id: '', provider_response: {} },\n  },\n  linkedin: {\n    summary: '',\n    hashtags: [],\n  },\n  response: {},\n  timestamps: {\n    created_at: now,\n    updated_at: now,\n    finished_at: '',\n  },\n};\n\nif (mode === 'manual') {\n  if (!manualTopic) {\n    state.status = 'rejected_input';\n    state.response = {\n      run_id: state.run_id,\n      status: state.status,\n      message: 'When discovery_mode=manual, topic is required.',\n    };\n    state.timestamps.finished_at = now;\n  } else {\n    const normalized = manualTopic.replace(/\\s+/g, ' ').trim();\n    state.discovery.topic_candidates = [\n      {\n        topic: normalized,\n        source: 'manual',\n        reason: 'Provided directly by user.',\n      },\n    ];\n  }\n}\n\nreturn [{ json: state }];"
-        }
+        ]
       },
       {
+        "parameters": {
+          "dataType": "string",
+          "value1": "={{$json.discovery.mode}}",
+          "rules": {
+            "rules": [
+              {
+                "value2": "manual",
+                "outputKey": "0"
+              },
+              {
+                "value2": "api",
+                "outputKey": "1"
+              }
+            ]
+          }
+        },
         "id": "f9697259-ba64-4c12-8a67-86c22af0fffa",
         "name": "Discovery Source Router",
         "type": "n8n-nodes-base.switch",
@@ -41,39 +58,9 @@
         "position": [
           480,
           0
-        ],
-        "parameters": {
-          "dataType": "string",
-          "value1": "={{$json.discovery.mode}}",
-          "rules": {
-            "rules": [
-              {
-                "operation": "equal",
-                "value2": "manual",
-                "outputKey": "0"
-              },
-              {
-                "operation": "equal",
-                "value2": "api",
-                "outputKey": "1"
-              }
-            ]
-          },
-          "mode": "rules",
-          "options": {
-            "fallbackOutput": 0
-          }
-        }
+        ]
       },
       {
-        "id": "52082b67-4242-458e-be2a-c9047f4a0b3e",
-        "name": "Fetch Topics API",
-        "type": "n8n-nodes-base.httpRequest",
-        "typeVersion": 4.2,
-        "position": [
-          720,
-          120
-        ],
         "parameters": {
           "method": "POST",
           "url": "={{$env.TOPIC_DISCOVERY_API_URL || \"https://api.tavily.com/search\"}}",
@@ -97,22 +84,33 @@
             "timeout": 45000
           }
         },
+        "id": "52082b67-4242-458e-be2a-c9047f4a0b3e",
+        "name": "Fetch Topics API",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          720,
+          128
+        ],
         "continueOnFail": true
       },
       {
+        "parameters": {
+          "jsCode": "const state = { ...$items('Normalize Discovery Input', 0, 0)[0].json };\nconst response = $json ?? {};\n\nconst results = Array.isArray(response.results) ? response.results : [];\nconst candidates = [];\n\nfor (const item of results) {\n  const title = (item.title ?? '').toString().trim();\n  const content = (item.content ?? '').toString().trim();\n  const topic = title || content.slice(0, 120);\n  if (!topic) continue;\n  candidates.push({\n    topic: topic.replace(/\\s+/g, ' ').trim(),\n    source: 'third_party_api',\n    reason: (item.url ?? 'external source').toString(),\n  });\n}\n\nif (candidates.length === 0 && state.discovery.query) {\n  candidates.push({\n    topic: state.discovery.query,\n    source: 'query_fallback',\n    reason: 'No discovery results returned by API.',\n  });\n}\n\nstate.discovery.topic_candidates = candidates;\nstate.timestamps.updated_at = new Date().toISOString();\nreturn [{ json: state }];"
+        },
         "id": "9bd430c4-c0ae-4731-aa1b-ad08c03e1484",
         "name": "Build API Topic Candidates",
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
           960,
-          120
-        ],
-        "parameters": {
-          "jsCode": "const state = { ...$items('Normalize Discovery Input', 0, 0)[0].json };\nconst response = $json ?? {};\n\nconst results = Array.isArray(response.results) ? response.results : [];\nconst candidates = [];\n\nfor (const item of results) {\n  const title = (item.title ?? '').toString().trim();\n  const content = (item.content ?? '').toString().trim();\n  const topic = title || content.slice(0, 120);\n  if (!topic) continue;\n  candidates.push({\n    topic: topic.replace(/\\s+/g, ' ').trim(),\n    source: 'third_party_api',\n    reason: (item.url ?? 'external source').toString(),\n  });\n}\n\nif (candidates.length === 0 && state.discovery.query) {\n  candidates.push({\n    topic: state.discovery.query,\n    source: 'query_fallback',\n    reason: 'No discovery results returned by API.',\n  });\n}\n\nstate.discovery.topic_candidates = candidates;\nstate.timestamps.updated_at = new Date().toISOString();\nreturn [{ json: state }];"
-        }
+          128
+        ]
       },
       {
+        "parameters": {
+          "jsCode": "const state = { ...$json };\nconst query = (state.discovery?.query ?? '').toLowerCase();\nconst candidates = Array.isArray(state.discovery?.topic_candidates) ? state.discovery.topic_candidates : [];\n\nconst blockedPatterns = [\n  /\\b(malware|ransomware|keylogger|botnet|trojan builder)\\b/i,\n  /\\b(exploit zero day|bypass firewall|credential stuffing|phishing kit|sql injection payload)\\b/i,\n  /\\b(fake medical|fabricate diagnosis|unsafe dosage|pretend doctor advice)\\b/i,\n  /\\b(plagiarize|copy exact article|rewrite this to avoid plagiarism checker)\\b/i,\n];\n\nconst scored = [];\nconst blocked = [];\nfor (const candidate of candidates) {\n  const topic = (candidate.topic ?? '').toString().replace(/\\s+/g, ' ').trim();\n  if (!topic) continue;\n  if (topic.length < 12) continue;\n\n  if (blockedPatterns.some((re) => re.test(topic))) {\n    blocked.push(topic);\n    continue;\n  }\n\n  let score = 20;\n  if (candidate.source === 'manual') score += 35;\n  if (topic.length >= 20 && topic.length <= 90) score += 15;\n\n  const queryTerms = query.split(/\\s+/).filter(Boolean);\n  for (const term of queryTerms) {\n    if (term.length > 3 && topic.toLowerCase().includes(term)) score += 4;\n  }\n\n  if (/\\b(vs|comparison|guide|best practices|architecture|checklist|tutorial)\\b/i.test(topic)) score += 12;\n  if (/\\b(oauth|oidc|sso|jwt|auth|security|api)\\b/i.test(topic)) score += 10;\n\n  scored.push({\n    topic,\n    source: candidate.source ?? 'unknown',\n    reason: candidate.reason ?? '',\n    score,\n  });\n}\n\nscored.sort((a, b) => b.score - a.score);\nconst selected = scored[0] ?? null;\n\nstate.discovery.scored_topics = scored.slice(0, 10);\nstate.discovery.blocked_topics = blocked;\nstate.discovery.selected_topic = selected?.topic ?? '';\nstate.discovery.selected_score = selected?.score ?? 0;\nstate.topic = selected?.topic ?? '';\n\nif (selected) {\n  state.status = 'topic_selected';\n} else {\n  state.status = 'no_topic_selected';\n  state.response = {\n    run_id: state.run_id,\n    status: state.status,\n    message: 'No viable topic after filtering and scoring.',\n    blocked_topics: blocked,\n  };\n  state.timestamps.finished_at = new Date().toISOString();\n}\n\nstate.timestamps.updated_at = new Date().toISOString();\nreturn [{ json: state }];"
+        },
         "id": "4d5ec2a7-0e63-4c61-b206-550a8b05cab6",
         "name": "Filter & Score Topics",
         "type": "n8n-nodes-base.code",
@@ -120,12 +118,19 @@
         "position": [
           1200,
           0
-        ],
-        "parameters": {
-          "jsCode": "const state = { ...$json };\nconst query = (state.discovery?.query ?? '').toLowerCase();\nconst candidates = Array.isArray(state.discovery?.topic_candidates) ? state.discovery.topic_candidates : [];\n\nconst blockedPatterns = [\n  /\\b(malware|ransomware|keylogger|botnet|trojan builder)\\b/i,\n  /\\b(exploit zero day|bypass firewall|credential stuffing|phishing kit|sql injection payload)\\b/i,\n  /\\b(fake medical|fabricate diagnosis|unsafe dosage|pretend doctor advice)\\b/i,\n  /\\b(plagiarize|copy exact article|rewrite this to avoid plagiarism checker)\\b/i,\n];\n\nconst scored = [];\nconst blocked = [];\nfor (const candidate of candidates) {\n  const topic = (candidate.topic ?? '').toString().replace(/\\s+/g, ' ').trim();\n  if (!topic) continue;\n  if (topic.length < 12) continue;\n\n  if (blockedPatterns.some((re) => re.test(topic))) {\n    blocked.push(topic);\n    continue;\n  }\n\n  let score = 20;\n  if (candidate.source === 'manual') score += 35;\n  if (topic.length >= 20 && topic.length <= 90) score += 15;\n\n  const queryTerms = query.split(/\\s+/).filter(Boolean);\n  for (const term of queryTerms) {\n    if (term.length > 3 && topic.toLowerCase().includes(term)) score += 4;\n  }\n\n  if (/\\b(vs|comparison|guide|best practices|architecture|checklist|tutorial)\\b/i.test(topic)) score += 12;\n  if (/\\b(oauth|oidc|sso|jwt|auth|security|api)\\b/i.test(topic)) score += 10;\n\n  scored.push({\n    topic,\n    source: candidate.source ?? 'unknown',\n    reason: candidate.reason ?? '',\n    score,\n  });\n}\n\nscored.sort((a, b) => b.score - a.score);\nconst selected = scored[0] ?? null;\n\nstate.discovery.scored_topics = scored.slice(0, 10);\nstate.discovery.blocked_topics = blocked;\nstate.discovery.selected_topic = selected?.topic ?? '';\nstate.discovery.selected_score = selected?.score ?? 0;\nstate.topic = selected?.topic ?? '';\n\nif (selected) {\n  state.status = 'topic_selected';\n} else {\n  state.status = 'no_topic_selected';\n  state.response = {\n    run_id: state.run_id,\n    status: state.status,\n    message: 'No viable topic after filtering and scoring.',\n    blocked_topics: blocked,\n  };\n  state.timestamps.finished_at = new Date().toISOString();\n}\n\nstate.timestamps.updated_at = new Date().toISOString();\nreturn [{ json: state }];"
-        }
+        ]
       },
       {
+        "parameters": {
+          "conditions": {
+            "string": [
+              {
+                "value1": "={{$json.status}}",
+                "value2": "topic_selected"
+              }
+            ]
+          }
+        },
         "id": "c738be5c-c654-4341-be04-efe686b2db74",
         "name": "Topic Selected?",
         "type": "n8n-nodes-base.if",
@@ -133,20 +138,14 @@
         "position": [
           1440,
           0
-        ],
-        "parameters": {
-          "conditions": {
-            "string": [
-              {
-                "value1": "={{$json.status}}",
-                "operation": "equal",
-                "value2": "topic_selected"
-              }
-            ]
-          }
-        }
+        ]
       },
       {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO content_runs (run_id, status, topic, idempotency_key, state, updated_at)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.status}}',\n  '{{$json.topic}}',\n  '{{ $json.idempotency_key || \"\" }}',\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (run_id)\nDO UPDATE SET\n  status = EXCLUDED.status,\n  topic = EXCLUDED.topic,\n  idempotency_key = EXCLUDED.idempotency_key,\n  state = EXCLUDED.state,\n  updated_at = NOW();",
+          "options": {}
+        },
         "id": "ef368efb-2473-4586-8f48-e0706cb61297",
         "name": "Persist After Discovery",
         "type": "n8n-nodes-base.postgres",
@@ -155,28 +154,15 @@
           1680,
           -160
         ],
-        "parameters": {
-          "operation": "executeQuery",
-          "query": "INSERT INTO content_runs (run_id, status, topic, idempotency_key, state, updated_at)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.status}}',\n  '{{$json.topic}}',\n  '{{ $json.idempotency_key || \"\" }}',\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (run_id)\nDO UPDATE SET\n  status = EXCLUDED.status,\n  topic = EXCLUDED.topic,\n  idempotency_key = EXCLUDED.idempotency_key,\n  state = EXCLUDED.state,\n  updated_at = NOW();",
-          "options": {}
-        },
-        "continueOnFail": true,
         "credentials": {
           "postgres": {
             "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
             "name": "Local Postgres (n8n)"
           }
-        }
+        },
+        "continueOnFail": true
       },
       {
-        "id": "783069af-8a73-458c-8ac8-4788ae79d2a3",
-        "name": "Topic Research Search",
-        "type": "n8n-nodes-base.httpRequest",
-        "typeVersion": 4.2,
-        "position": [
-          1920,
-          -160
-        ],
         "parameters": {
           "method": "POST",
           "url": "={{$env.TAVILY_API_URL || \"https://api.tavily.com/search\"}}",
@@ -196,17 +182,17 @@
             "timeout": 45000
           }
         },
-        "continueOnFail": true
-      },
-      {
-        "id": "73439553-2f61-4635-8671-5eea09d943a0",
-        "name": "Topic Research Synthesizer",
+        "id": "783069af-8a73-458c-8ac8-4788ae79d2a3",
+        "name": "Topic Research Search",
         "type": "n8n-nodes-base.httpRequest",
         "typeVersion": 4.2,
         "position": [
-          2160,
+          1920,
           -160
         ],
+        "continueOnFail": true
+      },
+      {
         "parameters": {
           "method": "POST",
           "url": "={{$env.OPENAI_API_URL || \"https://api.openai.com/v1/chat/completions\"}}",
@@ -230,9 +216,20 @@
             "timeout": 60000
           }
         },
+        "id": "73439553-2f61-4635-8671-5eea09d943a0",
+        "name": "Topic Research Synthesizer",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2160,
+          -160
+        ],
         "continueOnFail": true
       },
       {
+        "parameters": {
+          "jsCode": "const state = { ...(($node['Topic Selected?'] && $node['Topic Selected?'].json) || {}) };\nlet parsed = {};\ntry {\n  const content = $json.choices?.[0]?.message?.content ?? '{}';\n  parsed = typeof content === 'string' ? JSON.parse(content) : content;\n} catch (error) {\n  parsed = {};\n}\nif (!state.timestamps || typeof state.timestamps !== 'object') state.timestamps = {};\n\nconst research = parsed.research ?? {};\nstate.status = 'researched';\nstate.research = {\n  notes: Array.isArray(research.notes) ? research.notes : [],\n  sources: Array.isArray(research.sources) ? research.sources : [],\n  citations: Array.isArray(research.citations) ? research.citations : [],\n  confidence: research.confidence ?? 'low',\n};\nstate.timestamps.updated_at = new Date().toISOString();\nreturn [{ json: state }];"
+        },
         "id": "b0a8e0f7-7df6-4543-bdf9-5c61a8db14f3",
         "name": "Merge Topic Research",
         "type": "n8n-nodes-base.code",
@@ -240,20 +237,9 @@
         "position": [
           2400,
           -160
-        ],
-        "parameters": {
-          "jsCode": "const state = { ...(($node['Topic Selected?'] && $node['Topic Selected?'].json) || {}) };\nlet parsed = {};\ntry {\n  const content = $json.choices?.[0]?.message?.content ?? '{}';\n  parsed = typeof content === 'string' ? JSON.parse(content) : content;\n} catch (error) {\n  parsed = {};\n}\nif (!state.timestamps || typeof state.timestamps !== 'object') state.timestamps = {};\n\nconst research = parsed.research ?? {};\nstate.status = 'researched';\nstate.research = {\n  notes: Array.isArray(research.notes) ? research.notes : [],\n  sources: Array.isArray(research.sources) ? research.sources : [],\n  citations: Array.isArray(research.citations) ? research.citations : [],\n  confidence: research.confidence ?? 'low',\n};\nstate.timestamps.updated_at = new Date().toISOString();\nreturn [{ json: state }];"
-        }
+        ]
       },
       {
-        "id": "4b8b2934-d23a-4115-86ad-674c0ab44729",
-        "name": "Topic Review Agent",
-        "type": "n8n-nodes-base.httpRequest",
-        "typeVersion": 4.2,
-        "position": [
-          2640,
-          -160
-        ],
         "parameters": {
           "method": "POST",
           "url": "={{$env.OPENAI_API_URL || \"https://api.openai.com/v1/chat/completions\"}}",
@@ -277,9 +263,20 @@
             "timeout": 60000
           }
         },
+        "id": "4b8b2934-d23a-4115-86ad-674c0ab44729",
+        "name": "Topic Review Agent",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2640,
+          -160
+        ],
         "continueOnFail": true
       },
       {
+        "parameters": {
+          "jsCode": "const state = { ...(($node['Merge Topic Research'] && $node['Merge Topic Research'].json) || {}) };\nlet parsed = {};\ntry {\n  const content = $json.choices?.[0]?.message?.content ?? '{}';\n  parsed = typeof content === 'string' ? JSON.parse(content) : content;\n} catch (error) {\n  parsed = {};\n}\nif (!state.timestamps || typeof state.timestamps !== 'object') state.timestamps = {};\n\nconst review = parsed.review ?? {};\nconst score = Number(review.score ?? 0);\nstate.status = 'reviewed';\nstate.review = {\n  approved: Boolean(review.approved),\n  score: Number.isFinite(score) ? score : 0,\n  rationale: (review.rationale ?? '').toString(),\n  risks: Array.isArray(review.risks) ? review.risks : [],\n  improvements: Array.isArray(review.improvements) ? review.improvements : [],\n};\n\nstate.timestamps.updated_at = new Date().toISOString();\nreturn [{ json: state }];"
+        },
         "id": "007a5e85-90ae-4e9c-9164-84755765fbdf",
         "name": "Merge Topic Review",
         "type": "n8n-nodes-base.code",
@@ -287,12 +284,19 @@
         "position": [
           2880,
           -160
-        ],
-        "parameters": {
-          "jsCode": "const state = { ...(($node['Merge Topic Research'] && $node['Merge Topic Research'].json) || {}) };\nlet parsed = {};\ntry {\n  const content = $json.choices?.[0]?.message?.content ?? '{}';\n  parsed = typeof content === 'string' ? JSON.parse(content) : content;\n} catch (error) {\n  parsed = {};\n}\nif (!state.timestamps || typeof state.timestamps !== 'object') state.timestamps = {};\n\nconst review = parsed.review ?? {};\nconst score = Number(review.score ?? 0);\nstate.status = 'reviewed';\nstate.review = {\n  approved: Boolean(review.approved),\n  score: Number.isFinite(score) ? score : 0,\n  rationale: (review.rationale ?? '').toString(),\n  risks: Array.isArray(review.risks) ? review.risks : [],\n  improvements: Array.isArray(review.improvements) ? review.improvements : [],\n};\n\nstate.timestamps.updated_at = new Date().toISOString();\nreturn [{ json: state }];"
-        }
+        ]
       },
       {
+        "parameters": {
+          "conditions": {
+            "boolean": [
+              {
+                "value1": "={{$json.review.approved && ($json.review.score || 0) >= 70}}",
+                "value2": true
+              }
+            ]
+          }
+        },
         "id": "b437db58-5cf4-4ef1-b6e7-01173332396e",
         "name": "Topic Review Pass?",
         "type": "n8n-nodes-base.if",
@@ -300,41 +304,22 @@
         "position": [
           3120,
           -160
-        ],
-        "parameters": {
-          "conditions": {
-            "boolean": [
-              {
-                "value1": "={{$json.review.approved && ($json.review.score || 0) >= 70}}",
-                "value2": true,
-                "operation": "equal"
-              }
-            ]
-          }
-        }
+        ]
       },
       {
+        "parameters": {
+          "jsCode": "if (!$json.timestamps || typeof $json.timestamps !== 'object') $json.timestamps = {};\n$json.status = 'topic_rejected';\n$json.response = {\n  run_id: $json.run_id,\n  status: $json.status,\n  topic: $json.topic,\n  review: $json.review,\n  message: 'Topic review did not pass quality threshold.',\n};\n$json.timestamps.updated_at = new Date().toISOString();\n$json.timestamps.finished_at = new Date().toISOString();\nreturn [{ json: $json }];"
+        },
         "id": "f0c5b621-0ab0-482b-a5ff-501efcdf06cd",
         "name": "Mark Topic Rejected",
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          3360,
-          20
-        ],
-        "parameters": {
-          "jsCode": "if (!$json.timestamps || typeof $json.timestamps !== 'object') $json.timestamps = {};\n$json.status = 'topic_rejected';\n$json.response = {\n  run_id: $json.run_id,\n  status: $json.status,\n  topic: $json.topic,\n  review: $json.review,\n  message: 'Topic review did not pass quality threshold.',\n};\n$json.timestamps.updated_at = new Date().toISOString();\n$json.timestamps.finished_at = new Date().toISOString();\nreturn [{ json: $json }];"
-        }
+          3328,
+          -64
+        ]
       },
       {
-        "id": "80a02abe-7b09-4094-b4dd-5132a58e039d",
-        "name": "Draft Article Agent",
-        "type": "n8n-nodes-base.httpRequest",
-        "typeVersion": 4.2,
-        "position": [
-          3360,
-          -300
-        ],
         "parameters": {
           "method": "POST",
           "url": "={{$env.OPENAI_API_URL || \"https://api.openai.com/v1/chat/completions\"}}",
@@ -358,30 +343,30 @@
             "timeout": 60000
           }
         },
+        "id": "80a02abe-7b09-4094-b4dd-5132a58e039d",
+        "name": "Draft Article Agent",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3344,
+          -400
+        ],
         "continueOnFail": true
       },
       {
+        "parameters": {
+          "jsCode": "const state = { ...(($node['Merge Topic Review'] && $node['Merge Topic Review'].json) || {}) };\nlet parsed = {};\ntry {\n  const content = $json.choices?.[0]?.message?.content ?? '{}';\n  parsed = typeof content === 'string' ? JSON.parse(content) : content;\n} catch (error) {\n  parsed = {};\n}\nif (!state.timestamps || typeof state.timestamps !== 'object') state.timestamps = {};\n\nconst fallbackTitle = (state.topic || 'Untitled Topic') + ' - Practical Guide';\nconst fallbackSummary = 'Auto-generated summary.';\nconst fallbackMarkdown = '# ' + fallbackTitle + '\\n\\n' + fallbackSummary;\n\nstate.title = (parsed.title ?? fallbackTitle).toString();\nstate.summary = (parsed.summary ?? fallbackSummary).toString();\nstate.markdown_content = (parsed.markdown_content ?? '').toString().trim() || fallbackMarkdown;\nstate.status = 'draft_ready_for_publish';\nstate.timestamps.updated_at = new Date().toISOString();\nreturn [{ json: state }];"
+        },
         "id": "452787eb-0584-43e9-91fb-c7ad13117739",
         "name": "Merge Draft Article",
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          3600,
-          -300
-        ],
-        "parameters": {
-          "jsCode": "const state = { ...(($node['Merge Topic Review'] && $node['Merge Topic Review'].json) || {}) };\nlet parsed = {};\ntry {\n  const content = $json.choices?.[0]?.message?.content ?? '{}';\n  parsed = typeof content === 'string' ? JSON.parse(content) : content;\n} catch (error) {\n  parsed = {};\n}\nif (!state.timestamps || typeof state.timestamps !== 'object') state.timestamps = {};\n\nconst fallbackTitle = (state.topic || 'Untitled Topic') + ' - Practical Guide';\nconst fallbackSummary = 'Auto-generated summary.';\nconst fallbackMarkdown = '# ' + fallbackTitle + '\\n\\n' + fallbackSummary;\n\nstate.title = (parsed.title ?? fallbackTitle).toString();\nstate.summary = (parsed.summary ?? fallbackSummary).toString();\nstate.markdown_content = (parsed.markdown_content ?? '').toString().trim() || fallbackMarkdown;\nstate.status = 'draft_ready_for_publish';\nstate.timestamps.updated_at = new Date().toISOString();\nreturn [{ json: state }];"
-        }
+          3552,
+          -400
+        ]
       },
       {
-        "id": "b8f47b52-e994-495c-b104-f9d45ba60800",
-        "name": "Publish to Dev.to",
-        "type": "n8n-nodes-base.httpRequest",
-        "typeVersion": 4.2,
-        "position": [
-          3840,
-          -420
-        ],
         "parameters": {
           "method": "POST",
           "url": "={{$env.DEVTO_API_URL || \"https://dev.to/api/articles\"}}",
@@ -405,77 +390,43 @@
             "timeout": 45000
           }
         },
+        "id": "b8f47b52-e994-495c-b104-f9d45ba60800",
+        "name": "Publish to Dev.to",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3808,
+          -560
+        ],
         "continueOnFail": true
       },
       {
+        "parameters": {
+          "jsCode": "const state = { ...(($node['Merge Draft Article'] && $node['Merge Draft Article'].json) || {}) };\nconst response = $json ?? {};\nif (!state.timestamps || typeof state.timestamps !== 'object') state.timestamps = {};\nif (!state.publish || typeof state.publish !== 'object') state.publish = {};\nif (!state.publish.devto || typeof state.publish.devto !== 'object') state.publish.devto = {};\n\nconst url = (response.url ?? '').toString();\nconst articleId = response.id != null ? String(response.id) : '';\nstate.publish.devto = {\n  status: url ? 'published' : 'publish_failed',\n  url,\n  article_id: articleId,\n  provider_response: response,\n};\nstate.timestamps.updated_at = new Date().toISOString();\nreturn [{ json: state }];"
+        },
         "id": "d43f4975-0a27-450d-b7c1-20da6476d0c9",
         "name": "Merge Dev.to Publish Result",
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          4080,
-          -420
-        ],
-        "parameters": {
-          "jsCode": "const state = { ...(($node['Merge Draft Article'] && $node['Merge Draft Article'].json) || {}) };\nconst response = $json ?? {};\nif (!state.timestamps || typeof state.timestamps !== 'object') state.timestamps = {};\nif (!state.publish || typeof state.publish !== 'object') state.publish = {};\nif (!state.publish.devto || typeof state.publish.devto !== 'object') state.publish.devto = {};\n\nconst url = (response.url ?? '').toString();\nconst articleId = response.id != null ? String(response.id) : '';\nstate.publish.devto = {\n  status: url ? 'published' : 'publish_failed',\n  url,\n  article_id: articleId,\n  provider_response: response,\n};\nstate.timestamps.updated_at = new Date().toISOString();\nreturn [{ json: state }];"
-        }
+          4160,
+          -560
+        ]
       },
       {
-        "id": "afe1cdcd-60d3-4867-989b-ef23ef1e8e6f",
-        "name": "Publish to Medium",
-        "type": "n8n-nodes-base.httpRequest",
-        "typeVersion": 4.2,
-        "position": [
-          4320,
-          -420
-        ],
         "parameters": {
-          "method": "POST",
-          "url": "={{$env.MEDIUM_API_URL || (\"https://api.medium.com/v1/users/\" + ($env.MEDIUM_USER_ID || \"\") + \"/posts\")}}",
-          "sendHeaders": true,
-          "headerParameters": {
-            "parameters": [
-              {
-                "name": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "name": "Authorization",
-                "value": "={{\"Bearer \" + ($env.MEDIUM_ACCESS_TOKEN || \"\")}}"
-              }
-            ]
-          },
-          "sendBody": true,
-          "specifyBody": "json",
-          "jsonBody": "={{ { title: $json.title, contentFormat: \"markdown\", content: $json.markdown_content, publishStatus: \"public\", tags: [\"n8n\",\"ai\",\"content\"] } }}",
-          "options": {
-            "timeout": 45000
-          }
+          "jsCode": "const state = { ...(($node['Merge Dev.to Publish Result'] && $node['Merge Dev.to Publish Result'].json) || {}) };\nconst response = $json ?? {};\nconst data = response.data ?? response;\nif (!state.timestamps || typeof state.timestamps !== 'object') state.timestamps = {};\nif (!state.publish || typeof state.publish !== 'object') state.publish = {};\nif (!state.publish.medium || typeof state.publish.medium !== 'object') state.publish.medium = {};\n\nconst url = (data.url ?? data.canonicalUrl ?? '').toString();\nconst articleId = data.id != null ? String(data.id) : '';\nstate.publish.medium = {\n  status: url || articleId ? 'published' : 'publish_failed',\n  url,\n  article_id: articleId,\n  provider_response: response,\n};\nstate.timestamps.updated_at = new Date().toISOString();\nreturn [{ json: state }];"
         },
-        "continueOnFail": true
-      },
-      {
         "id": "4873a87e-262b-48e2-ba3c-c9c30e8aca9a",
         "name": "Merge Medium Publish Result",
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          4560,
-          -420
-        ],
-        "parameters": {
-          "jsCode": "const state = { ...(($node['Merge Dev.to Publish Result'] && $node['Merge Dev.to Publish Result'].json) || {}) };\nconst response = $json ?? {};\nconst data = response.data ?? response;\nif (!state.timestamps || typeof state.timestamps !== 'object') state.timestamps = {};\nif (!state.publish || typeof state.publish !== 'object') state.publish = {};\nif (!state.publish.medium || typeof state.publish.medium !== 'object') state.publish.medium = {};\n\nconst url = (data.url ?? data.canonicalUrl ?? '').toString();\nconst articleId = data.id != null ? String(data.id) : '';\nstate.publish.medium = {\n  status: url || articleId ? 'published' : 'publish_failed',\n  url,\n  article_id: articleId,\n  provider_response: response,\n};\nstate.timestamps.updated_at = new Date().toISOString();\nreturn [{ json: state }];"
-        }
+          4176,
+          -400
+        ]
       },
       {
-        "id": "08fb4e08-ceff-4716-86c0-22b8ce0b4f44",
-        "name": "Generate LinkedIn Summary",
-        "type": "n8n-nodes-base.httpRequest",
-        "typeVersion": 4.2,
-        "position": [
-          4800,
-          -420
-        ],
         "parameters": {
           "method": "POST",
           "url": "={{$env.OPENAI_API_URL || \"https://api.openai.com/v1/chat/completions\"}}",
@@ -499,70 +450,188 @@
             "timeout": 45000
           }
         },
+        "id": "08fb4e08-ceff-4716-86c0-22b8ce0b4f44",
+        "name": "Generate LinkedIn Summary",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3808,
+          -224
+        ],
         "continueOnFail": true
       },
       {
+        "parameters": {
+          "jsCode": "const state = { ...(($node['Merge Medium Publish Result'] && $node['Merge Medium Publish Result'].json) || {}) };\nlet parsed = {};\ntry {\n  const content = $json.choices?.[0]?.message?.content ?? '{}';\n  parsed = typeof content === 'string' ? JSON.parse(content) : content;\n} catch (error) {\n  parsed = {};\n}\nif (!state.timestamps || typeof state.timestamps !== 'object') state.timestamps = {};\nif (!state.publish || typeof state.publish !== 'object') state.publish = {};\nif (!state.publish.devto || typeof state.publish.devto !== 'object') state.publish.devto = {};\nif (!state.publish.medium || typeof state.publish.medium !== 'object') state.publish.medium = {};\nif (!state.review || typeof state.review !== 'object') state.review = {};\n\nstate.linkedin = {\n  summary: (parsed.linkedin_summary ?? '').toString(),\n  hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags : [],\n};\n\nconst devtoOk = state.publish?.devto?.status === 'published';\nconst mediumOk = state.publish?.medium?.status === 'published';\nstate.status = devtoOk || mediumOk ? 'published' : 'publish_failed';\n\nstate.response = {\n  run_id: state.run_id,\n  status: state.status,\n  selected_topic: state.topic,\n  review_score: state.review?.score ?? 0,\n  devto_url: state.publish?.devto?.url || null,\n  medium_url: state.publish?.medium?.url || null,\n  linkedin_summary: state.linkedin.summary || '',\n};\n\nstate.timestamps.updated_at = new Date().toISOString();\nstate.timestamps.finished_at = new Date().toISOString();\nreturn [{ json: state }];"
+        },
         "id": "853b31a0-b223-4666-8602-e90ebee6aa96",
         "name": "Merge LinkedIn Summary",
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          5040,
-          -420
-        ],
-        "parameters": {
-          "jsCode": "const state = { ...(($node['Merge Medium Publish Result'] && $node['Merge Medium Publish Result'].json) || {}) };\nlet parsed = {};\ntry {\n  const content = $json.choices?.[0]?.message?.content ?? '{}';\n  parsed = typeof content === 'string' ? JSON.parse(content) : content;\n} catch (error) {\n  parsed = {};\n}\nif (!state.timestamps || typeof state.timestamps !== 'object') state.timestamps = {};\nif (!state.publish || typeof state.publish !== 'object') state.publish = {};\nif (!state.publish.devto || typeof state.publish.devto !== 'object') state.publish.devto = {};\nif (!state.publish.medium || typeof state.publish.medium !== 'object') state.publish.medium = {};\nif (!state.review || typeof state.review !== 'object') state.review = {};\n\nstate.linkedin = {\n  summary: (parsed.linkedin_summary ?? '').toString(),\n  hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags : [],\n};\n\nconst devtoOk = state.publish?.devto?.status === 'published';\nconst mediumOk = state.publish?.medium?.status === 'published';\nstate.status = devtoOk || mediumOk ? 'published' : 'publish_failed';\n\nstate.response = {\n  run_id: state.run_id,\n  status: state.status,\n  selected_topic: state.topic,\n  review_score: state.review?.score ?? 0,\n  devto_url: state.publish?.devto?.url || null,\n  medium_url: state.publish?.medium?.url || null,\n  linkedin_summary: state.linkedin.summary || '',\n};\n\nstate.timestamps.updated_at = new Date().toISOString();\nstate.timestamps.finished_at = new Date().toISOString();\nreturn [{ json: state }];"
-        }
+          4160,
+          -224
+        ]
       },
       {
+        "parameters": {
+          "jsCode": "if (!$json.timestamps || typeof $json.timestamps !== 'object') $json.timestamps = {};\n$json.status = 'no_topic_selected';\n$json.response = $json.response || {\n  run_id: $json.run_id,\n  status: $json.status,\n  message: 'No topic selected after filtering and scoring.',\n};\n$json.timestamps.updated_at = new Date().toISOString();\n$json.timestamps.finished_at = new Date().toISOString();\nreturn [{ json: $json }];"
+        },
         "id": "b8f0ca0c-4192-4254-925f-d53bc15a13e8",
         "name": "Mark No Topic Selected",
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
-          1680,
-          160
-        ],
-        "parameters": {
-          "jsCode": "if (!$json.timestamps || typeof $json.timestamps !== 'object') $json.timestamps = {};\n$json.status = 'no_topic_selected';\n$json.response = $json.response || {\n  run_id: $json.run_id,\n  status: $json.status,\n  message: 'No topic selected after filtering and scoring.',\n};\n$json.timestamps.updated_at = new Date().toISOString();\n$json.timestamps.finished_at = new Date().toISOString();\nreturn [{ json: $json }];"
-        }
+          3344,
+          112
+        ]
       },
       {
-        "id": "2c11ecc3-8394-4a38-9cff-b0e4183decd2",
-        "name": "Persist Final State",
-        "type": "n8n-nodes-base.postgres",
-        "typeVersion": 2.5,
-        "position": [
-          5280,
-          -120
-        ],
         "parameters": {
           "operation": "executeQuery",
           "query": "INSERT INTO content_runs (run_id, status, topic, idempotency_key, state, updated_at)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.status}}',\n  '{{$json.topic}}',\n  '{{ $json.idempotency_key || \"\" }}',\n  '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb,\n  NOW()\n)\nON CONFLICT (run_id)\nDO UPDATE SET\n  status = EXCLUDED.status,\n  topic = EXCLUDED.topic,\n  idempotency_key = EXCLUDED.idempotency_key,\n  state = EXCLUDED.state,\n  updated_at = NOW();",
           "options": {}
         },
-        "continueOnFail": true,
+        "id": "2c11ecc3-8394-4a38-9cff-b0e4183decd2",
+        "name": "Persist Final State",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          4880,
+          -192
+        ],
         "credentials": {
           "postgres": {
             "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
             "name": "Local Postgres (n8n)"
           }
-        }
+        },
+        "continueOnFail": true
       },
       {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{$json.response}}",
+          "options": {}
+        },
         "id": "4c4df890-ef39-4462-aaf9-15bbfcc5abb3",
         "name": "Return API Response",
         "type": "n8n-nodes-base.respondToWebhook",
         "typeVersion": 1,
         "position": [
-          5520,
-          -120
-        ],
+          5136,
+          -96
+        ]
+      },
+      {
+        "parameters": {},
+        "id": "a5cd0233-630b-4838-b85a-9a729006a5e5",
+        "name": "Error Trigger",
+        "type": "n8n-nodes-base.errorTrigger",
+        "typeVersion": 1,
+        "position": [
+          3376,
+          1088
+        ]
+      },
+      {
         "parameters": {
-          "respondWith": "json",
-          "responseBody": "={{$json.response}}",
+          "jsCode": "const err = $json.execution?.error ?? $json.error ?? {};\nconst runId = $json.execution?.id ? String($json.execution.id) : 'unknown';\n\nreturn [{\n  json: {\n    run_id: runId,\n    stage: 'workflow_error',\n    level: 'error',\n    message: err.message ?? 'Unhandled workflow error',\n    payload: {\n      workflow: $json.workflow ?? null,\n      error: err,\n      execution: $json.execution ?? null,\n    },\n    created_at: new Date().toISOString(),\n  },\n}];"
+        },
+        "id": "830d964c-7946-45d4-8efe-3151c21d70e9",
+        "name": "Build Error Event",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3616,
+          1088
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO content_events (run_id, stage, level, message, payload)\nVALUES (\n  '{{$json.run_id}}',\n  '{{$json.stage}}',\n  '{{$json.level}}',\n  '{{$json.message}}',\n  '{{ JSON.stringify($json.payload).replace(/'/g, \"''\") }}'::jsonb\n);",
           "options": {}
-        }
+        },
+        "id": "1e0bd39a-8b19-454f-b1bf-60a260b524fe",
+        "name": "Insert Error Log",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          3856,
+          960
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "f3dc8f0f-1f70-47f5-bf25-10b0d2e55111",
+            "name": "Local Postgres (n8n)"
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{$env.ERROR_ALERT_WEBHOOK_URL || \"https://example.com/hooks/workflow-errors\"}}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ { run_id: $json.run_id, stage: $json.stage, level: $json.level, message: $json.message, created_at: $json.created_at } }}",
+          "options": {
+            "timeout": 30000
+          }
+        },
+        "id": "49c091df-5179-4534-ad34-fa3e4cc34094",
+        "name": "Alert Ops Channel",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3856,
+          1136
+        ],
+        "continueOnFail": true
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{$env.MEDIUM_API_URL || (\"https://api.medium.com/v1/users/\" + ($env.MEDIUM_USER_ID || \"\") + \"/posts\")}}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Authorization",
+                "value": "={{\"Bearer \" + ($env.MEDIUM_ACCESS_TOKEN || \"\")}}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ { title: $json.title, contentFormat: \"markdown\", content: $json.markdown_content, publishStatus: \"public\", tags: [\"n8n\",\"ai\",\"content\"] } }}",
+          "options": {
+            "timeout": 45000
+          }
+        },
+        "id": "afe1cdcd-60d3-4867-989b-ef23ef1e8e6f",
+        "name": "Publish to Medium",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3808,
+          -400
+        ],
+        "continueOnFail": true
       }
     ],
     "connections": {
@@ -785,6 +854,16 @@
               "node": "Publish to Dev.to",
               "type": "main",
               "index": 0
+            },
+            {
+              "node": "Publish to Medium",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Generate LinkedIn Summary",
+              "type": "main",
+              "index": 0
             }
           ]
         ]
@@ -804,18 +883,7 @@
         "main": [
           [
             {
-              "node": "Publish to Medium",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Publish to Medium": {
-        "main": [
-          [
-            {
-              "node": "Merge Medium Publish Result",
+              "node": "Persist Final State",
               "type": "main",
               "index": 0
             }
@@ -826,7 +894,7 @@
         "main": [
           [
             {
-              "node": "Generate LinkedIn Summary",
+              "node": "Persist Final State",
               "type": "main",
               "index": 0
             }
@@ -851,7 +919,51 @@
               "node": "Persist Final State",
               "type": "main",
               "index": 0
+            }
+          ]
+        ]
+      },
+      "Error Trigger": {
+        "main": [
+          [
+            {
+              "node": "Build Error Event",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Error Event": {
+        "main": [
+          [
+            {
+              "node": "Insert Error Log",
+              "type": "main",
+              "index": 0
             },
+            {
+              "node": "Alert Ops Channel",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Publish to Medium": {
+        "main": [
+          [
+            {
+              "node": "Merge Medium Publish Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Persist Final State": {
+        "main": [
+          [
             {
               "node": "Return API Response",
               "type": "main",
@@ -870,13 +982,11 @@
       "timezone": "UTC"
     },
     "staticData": null,
-    "pinData": {},
-    "active": false,
-    "tags": [],
-    "versionId": "59ca6ae7-edf2-44ae-ae27-38c697e1551b",
     "meta": {
-      "templateCredsSetupCompleted": false,
-      "generatedAt": "2026-03-09T06:02:37.614Z"
-    }
+      "templateCredsSetupCompleted": false
+    },
+    "pinData": {},
+    "versionId": "14a4a583-185f-4964-be34-8f6c7ba3c047",
+    "tags": []
   }
 ]
