@@ -3,17 +3,11 @@ SHELL := /bin/zsh
 INFRA_DIR := infra
 ENV_FILE := .env
 COMPOSE_FILE := $(INFRA_DIR)/docker-compose.yml
-WORKFLOW_BUNDLE := workflows/bundle.workflows.json
 N8N_CONTAINER := ai-content-n8n-n8n-1
-POSTGRES_CONTAINER := ai-content-n8n-postgres-1
 DASHBOARD_CONTAINER := ai-content-n8n-dashboard-1
-MAIN_WORKFLOW_ID := Xlc6ZFLdozHji7p7
-N8N_IMAGE_COMPAT := n8nio/n8n:1.60.1
-PG_CREDENTIAL_ID ?= f3dc8f0f-1f70-47f5-bf25-10b0d2e55111
-PG_CREDENTIAL_NAME ?= Local Postgres (n8n)
 LIVE_EXPORT_TMP := /tmp/WF_Content_Orchestrator.live.json
 
-.PHONY: help generate-single-user-workflow n8n-pull n8n-pull-compat n8n-up n8n-up-compat n8n-up-recreate n8n-down n8n-ps n8n-logs n8n-restart n8n-import-bundle n8n-import-postgres-credential n8n-publish-workflows n8n-import-bundle-live n8n-export-main n8n-status n8n-workflow-ids n8n-doctor bind-postgres-cred-files dashboard-health dashboard-logs
+.PHONY: help generate-single-user-workflow n8n-pull n8n-up n8n-up-recreate n8n-down n8n-ps n8n-logs n8n-restart n8n-import-bundle n8n-import-postgres-credential n8n-publish-workflows n8n-import-bundle-live n8n-export-main n8n-status n8n-workflow-ids n8n-doctor dashboard-health dashboard-logs db-apply-schema db-dump-schema db-dump-content db-apply-content db-restore-file db-query
 
 help: ## Show available targets
 	@awk 'BEGIN {FS=":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf " - %s\n", $$1 " — " $$2}' Makefile
@@ -21,17 +15,11 @@ help: ## Show available targets
 generate-single-user-workflow: ## Generate single-user single-workflow bundle
 	node scripts/generate-single-user-workflow.mjs
 
-n8n-pull: ## Pull n8n/postgres images
+n8n-pull: ## Pull stack images
 	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) pull
-
-n8n-pull-compat: ## Pull compatibility n8n image for older Docker engines
-	docker pull $(N8N_IMAGE_COMPAT)
 
 n8n-up: ## Start stack in background using N8N_IMAGE from .env
 	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) up -d
-
-n8n-up-compat: ## Start stack with temporary compatibility image (n8nio/n8n:1.60.1)
-	N8N_IMAGE=$(N8N_IMAGE_COMPAT) docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) up -d
 
 n8n-up-recreate: ## Recreate n8n service with current env/image
 	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) up -d --force-recreate n8n
@@ -42,8 +30,8 @@ n8n-down: ## Stop stack
 n8n-ps: ## Show stack status
 	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) ps
 
-n8n-logs: ## Tail n8n, postgres, and dashboard logs
-	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) logs --no-color --tail=120 n8n postgres dashboard
+n8n-logs: ## Tail n8n and dashboard logs
+	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) logs --no-color --tail=120 n8n dashboard
 
 n8n-restart: ## Restart n8n service
 	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) restart n8n
@@ -51,29 +39,29 @@ n8n-restart: ## Restart n8n service
 n8n-import-bundle: ## Import bundle.workflows.json into running n8n
 	docker exec $(N8N_CONTAINER) n8n import:workflow --input=/workflows/bundle.workflows.json
 
-n8n-import-postgres-credential: ## Import local Postgres credential into n8n
+n8n-import-postgres-credential: ## Import Postgres credential into n8n
 	docker exec $(N8N_CONTAINER) n8n import:credentials --input=/workflows/postgres.credentials.json
 
-n8n-publish-workflows: ## Publish single orchestrator workflow (needed for n8n 2.11 webhook registration)
+n8n-publish-workflows: ## Publish workflow. Usage: make n8n-publish-workflows MAIN_WORKFLOW_ID=<workflow_id>
+	@test -n "$(MAIN_WORKFLOW_ID)" || (echo "MAIN_WORKFLOW_ID is required. Example: make n8n-publish-workflows MAIN_WORKFLOW_ID=Xlc6ZFLdozHji7p7" && exit 1)
 	@echo "Publishing $(MAIN_WORKFLOW_ID)"
 	@docker exec $(N8N_CONTAINER) n8n publish:workflow --id=$(MAIN_WORKFLOW_ID)
 
-n8n-import-bundle-live: ## Import bundle, publish workflows, and restart n8n
+n8n-import-bundle-live: ## Import bundle, publish workflow, and restart n8n. Usage: make n8n-import-bundle-live MAIN_WORKFLOW_ID=<workflow_id>
+	@test -n "$(MAIN_WORKFLOW_ID)" || (echo "MAIN_WORKFLOW_ID is required. Example: make n8n-import-bundle-live MAIN_WORKFLOW_ID=Xlc6ZFLdozHji7p7" && exit 1)
 	$(MAKE) n8n-import-bundle
-	$(MAKE) n8n-publish-workflows
+	$(MAKE) n8n-publish-workflows MAIN_WORKFLOW_ID="$(MAIN_WORKFLOW_ID)"
 	$(MAKE) n8n-restart
 
-n8n-export-main: ## Export live orchestrator and sanitize runtime metadata for local workflow files
+n8n-export-main: ## Export one workflow and sync local JSON files. Usage: make n8n-export-main MAIN_WORKFLOW_ID=<workflow_id>
+	@test -n "$(MAIN_WORKFLOW_ID)" || (echo "MAIN_WORKFLOW_ID is required. Example: make n8n-export-main MAIN_WORKFLOW_ID=Xlc6ZFLdozHji7p7" && exit 1)
 	docker exec $(N8N_CONTAINER) n8n export:workflow --id=$(MAIN_WORKFLOW_ID) --output=$(LIVE_EXPORT_TMP) --pretty
 	docker cp $(N8N_CONTAINER):$(LIVE_EXPORT_TMP) workflows/.live-export.json
 	node scripts/sync-live-export.mjs workflows/.live-export.json workflows/WF_Content_Orchestrator.json workflows/bundle.workflows.json
 	rm -f workflows/.live-export.json
 
-bind-postgres-cred-files: ## Bind Postgres credential in exported workflow files
-	node scripts/bind-postgres-credential.mjs "$(PG_CREDENTIAL_ID)" "$(PG_CREDENTIAL_NAME)"
-
-n8n-workflow-ids: ## List imported workflow IDs from Postgres
-	docker exec $(POSTGRES_CONTAINER) psql -U n8n -d n8n -c "SELECT id, name, active FROM workflow_entity WHERE name LIKE 'WF_%' ORDER BY name;"
+n8n-workflow-ids: ## List imported workflow IDs from external Postgres
+	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh query "SELECT id, name, active FROM workflow_entity WHERE name LIKE 'WF_%' ORDER BY name;"
 
 n8n-status: ## Quick health/status check
 	@echo "Stack status:"
@@ -88,7 +76,7 @@ n8n-status: ## Quick health/status check
 n8n-doctor: ## Print Docker+n8n compatibility diagnostics
 	@echo "Docker Server Version: $$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo unavailable)"
 	@echo "Configured N8N_IMAGE: $$(grep '^N8N_IMAGE=' $(ENV_FILE) | cut -d'=' -f2-)"
-	@echo "If n8n:2.x pull fails with 'invalid tar header', update Docker Desktop or use 'make n8n-up-compat'."
+	@echo "If image pulls fail, ensure Docker Desktop and registry access are healthy."
 
 dashboard-health: ## Query dashboard health endpoint from inside dashboard container
 	docker exec $(DASHBOARD_CONTAINER) sh -lc "wget -qO- http://127.0.0.1:3012/health"
@@ -96,28 +84,23 @@ dashboard-health: ## Query dashboard health endpoint from inside dashboard conta
 dashboard-logs: ## Tail only dashboard logs
 	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) logs --no-color --tail=120 dashboard
 
-db-local-apply-schema: ## Apply infra/initdb schema to local Docker Postgres
-	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh local apply-schema
+db-apply-schema: ## Apply infra/initdb schema to external Postgres from .env POSTGRES_*
+	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh apply-schema
 
-db-local-dump-schema: ## Dump schema from local Docker Postgres
-	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh local dump-schema
+db-dump-schema: ## Dump schema from external Postgres
+	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh dump-schema
 
-db-local-dump-content: ## Dump content_runs/content_events data from local Docker Postgres
-	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh local dump-content-data
+db-dump-content: ## Dump content_runs/content_events data from external Postgres
+	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh dump-content-data
 
-db-local-restore-file: ## Restore SQL file into local Docker Postgres. Usage: make db-local-restore-file SQL_FILE=tmp/db/file.sql
+db-apply-content: ## Apply SQL content dump file into external Postgres. Usage: make db-apply-content SQL_FILE=tmp/db/file.sql
 	@test -n "$(SQL_FILE)" || (echo "SQL_FILE is required" && exit 1)
-	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh local restore-file "$(SQL_FILE)"
+	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh restore-file "$(SQL_FILE)"
 
-db-external-apply-schema: ## Apply infra/initdb schema to external Postgres from .env POSTGRES_*
-	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh external apply-schema
-
-db-external-dump-schema: ## Dump schema from external Postgres
-	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh external dump-schema
-
-db-external-dump-content: ## Dump content_runs/content_events data from external Postgres
-	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh external dump-content-data
-
-db-external-restore-file: ## Restore SQL file into external Postgres. Usage: make db-external-restore-file SQL_FILE=tmp/db/file.sql
+db-restore-file: ## Restore SQL file into external Postgres. Usage: make db-restore-file SQL_FILE=tmp/db/file.sql
 	@test -n "$(SQL_FILE)" || (echo "SQL_FILE is required" && exit 1)
-	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh external restore-file "$(SQL_FILE)"
+	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh restore-file "$(SQL_FILE)"
+
+db-query: ## Execute ad-hoc SQL query. Usage: make db-query SQL=\"SELECT 1;\"
+	@test -n "$(SQL)" || (echo "SQL is required" && exit 1)
+	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh query "$(SQL)"
