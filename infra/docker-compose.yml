@@ -2,6 +2,7 @@ name: ai-content-n8n
 
 services:
   postgres:
+    profiles: ["localdb"]
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -25,15 +26,15 @@ services:
   n8n:
     image: ${N8N_IMAGE:-n8nio/n8n:2.11.1}
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
+    # depends_on:
+    #   postgres:
+    #     condition: service_healthy
     ports:
       - "${N8N_PORT:-5678}:5678"
     environment:
       DB_TYPE: postgresdb
-      DB_POSTGRESDB_HOST: postgres
-      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_HOST: ${POSTGRES_HOST:-postgres}
+      DB_POSTGRESDB_PORT: ${POSTGRES_PORT:-5432}
       DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-n8n}
       DB_POSTGRESDB_USER: ${POSTGRES_USER:-n8n}
       DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD:-n8npass}
@@ -47,6 +48,19 @@ services:
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
       N8N_SECURE_COOKIE: "false"
       N8N_DIAGNOSTICS_ENABLED: "false"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_API_URL: ${OPENAI_API_URL:-https://api.openai.com/v1/chat/completions}
+      TOPIC_DISCOVERY_API_URL: ${TOPIC_DISCOVERY_API_URL:-https://api.tavily.com/search}
+      TOPIC_DISCOVERY_API_KEY: ${TOPIC_DISCOVERY_API_KEY:-}
+      TAVILY_API_URL: ${TAVILY_API_URL:-https://api.tavily.com/search}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      DEVTO_API_URL: ${DEVTO_API_URL:-https://dev.to/api/articles}
+      DEVTO_API_KEY: ${DEVTO_API_KEY:-}
+      MEDIUM_API_URL: ${MEDIUM_API_URL:-}
+      MEDIUM_USER_ID: ${MEDIUM_USER_ID:-}
+      MEDIUM_ACCESS_TOKEN: ${MEDIUM_ACCESS_TOKEN:-}
+      ERROR_ALERT_WEBHOOK_URL: ${ERROR_ALERT_WEBHOOK_URL:-}
     volumes:
       - n8n_data:/home/node/.n8n
       - ../workflows:/workflows:ro
@@ -57,16 +71,16 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
+      # postgres:
+      #   condition: service_healthy
       n8n:
         condition: service_started
     ports:
       - "${DASHBOARD_PORT:-3012}:3012"
     environment:
       PORT: 3012
-      DB_POSTGRESDB_HOST: postgres
-      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_HOST: ${POSTGRES_HOST:-postgres}
+      DB_POSTGRESDB_PORT: ${POSTGRES_PORT:-5432}
       DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-n8n}
       DB_POSTGRESDB_USER: ${POSTGRES_USER:-n8n}
       DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD:-n8npass}

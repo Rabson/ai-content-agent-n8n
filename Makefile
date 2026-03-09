@@ -11,8 +11,9 @@ MAIN_WORKFLOW_ID := Xlc6ZFLdozHji7p7
 N8N_IMAGE_COMPAT := n8nio/n8n:1.60.1
 PG_CREDENTIAL_ID ?= f3dc8f0f-1f70-47f5-bf25-10b0d2e55111
 PG_CREDENTIAL_NAME ?= Local Postgres (n8n)
+LIVE_EXPORT_TMP := /tmp/WF_Content_Orchestrator.live.json
 
-.PHONY: help generate-single-user-workflow n8n-pull n8n-pull-compat n8n-up n8n-up-compat n8n-up-recreate n8n-down n8n-ps n8n-logs n8n-restart n8n-import-bundle n8n-import-postgres-credential n8n-publish-workflows n8n-import-bundle-live n8n-status n8n-workflow-ids n8n-doctor bind-postgres-cred-files dashboard-health dashboard-logs
+.PHONY: help generate-single-user-workflow n8n-pull n8n-pull-compat n8n-up n8n-up-compat n8n-up-recreate n8n-down n8n-ps n8n-logs n8n-restart n8n-import-bundle n8n-import-postgres-credential n8n-publish-workflows n8n-import-bundle-live n8n-export-main n8n-status n8n-workflow-ids n8n-doctor bind-postgres-cred-files dashboard-health dashboard-logs
 
 help: ## Show available targets
 	@awk 'BEGIN {FS=":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf " - %s\n", $$1 " — " $$2}' Makefile
@@ -62,6 +63,12 @@ n8n-import-bundle-live: ## Import bundle, publish workflows, and restart n8n
 	$(MAKE) n8n-publish-workflows
 	$(MAKE) n8n-restart
 
+n8n-export-main: ## Export live orchestrator and sanitize runtime metadata for local workflow files
+	docker exec $(N8N_CONTAINER) n8n export:workflow --id=$(MAIN_WORKFLOW_ID) --output=$(LIVE_EXPORT_TMP) --pretty
+	docker cp $(N8N_CONTAINER):$(LIVE_EXPORT_TMP) workflows/.live-export.json
+	node scripts/sync-live-export.mjs workflows/.live-export.json workflows/WF_Content_Orchestrator.json workflows/bundle.workflows.json
+	rm -f workflows/.live-export.json
+
 bind-postgres-cred-files: ## Bind Postgres credential in exported workflow files
 	node scripts/bind-postgres-credential.mjs "$(PG_CREDENTIAL_ID)" "$(PG_CREDENTIAL_NAME)"
 
@@ -88,3 +95,29 @@ dashboard-health: ## Query dashboard health endpoint from inside dashboard conta
 
 dashboard-logs: ## Tail only dashboard logs
 	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) logs --no-color --tail=120 dashboard
+
+db-local-apply-schema: ## Apply infra/initdb schema to local Docker Postgres
+	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh local apply-schema
+
+db-local-dump-schema: ## Dump schema from local Docker Postgres
+	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh local dump-schema
+
+db-local-dump-content: ## Dump content_runs/content_events data from local Docker Postgres
+	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh local dump-content-data
+
+db-local-restore-file: ## Restore SQL file into local Docker Postgres. Usage: make db-local-restore-file SQL_FILE=tmp/db/file.sql
+	@test -n "$(SQL_FILE)" || (echo "SQL_FILE is required" && exit 1)
+	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh local restore-file "$(SQL_FILE)"
+
+db-external-apply-schema: ## Apply infra/initdb schema to external Postgres from .env POSTGRES_*
+	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh external apply-schema
+
+db-external-dump-schema: ## Dump schema from external Postgres
+	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh external dump-schema
+
+db-external-dump-content: ## Dump content_runs/content_events data from external Postgres
+	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh external dump-content-data
+
+db-external-restore-file: ## Restore SQL file into external Postgres. Usage: make db-external-restore-file SQL_FILE=tmp/db/file.sql
+	@test -n "$(SQL_FILE)" || (echo "SQL_FILE is required" && exit 1)
+	ENV_FILE=$(ENV_FILE) scripts/db-sync.sh external restore-file "$(SQL_FILE)"

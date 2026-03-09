@@ -20,9 +20,23 @@
    - `n8n publish:workflow --id=Xlc6ZFLdozHji7p7`
 4. Restart n8n.
 
+## Export back from live n8n
+
+If you edit the workflow in n8n UI and want to persist those edits in git-managed JSON files:
+
+- `make n8n-export-main`
+
+This rewrites:
+
+- `workflows/WF_Content_Orchestrator.json` (single object)
+- `workflows/bundle.workflows.json` (array bundle)
+
+The sync script removes volatile runtime metadata from exported JSON so commits stay clean.
+
 ## Notes
 
 - No `Execute Workflow` node linking is required.
+- Additional `WF_Approval`, `WF_Research`, `WF_Writing`, `WF_Review`, `WF_Publish`, `WF_Log_Event`, and `WF_Error_Handler` files are kept as modular reference exports; the default deploy/import path uses only `WF_Content_Orchestrator` via `bundle.workflows.json`.
 - Webhook endpoint: `POST /webhook/content-topic-intake`
 - Postgres credential name/id in workflow export:
   - `Local Postgres (n8n)` / `f3dc8f0f-1f70-47f5-bf25-10b0d2e55111`
