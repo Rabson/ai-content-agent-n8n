@@ -47,14 +47,32 @@ services:
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
       N8N_SECURE_COOKIE: "false"
       N8N_DIAGNOSTICS_ENABLED: "false"
-      WF_RESEARCH_ID: ${WF_RESEARCH_ID:-}
-      WF_WRITING_ID: ${WF_WRITING_ID:-}
-      WF_REVIEW_ID: ${WF_REVIEW_ID:-}
-      WF_APPROVAL_ID: ${WF_APPROVAL_ID:-}
-      WF_PUBLISH_ID: ${WF_PUBLISH_ID:-}
     volumes:
       - n8n_data:/home/node/.n8n
       - ../workflows:/workflows:ro
+
+  dashboard:
+    build:
+      context: ../dashboard
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      n8n:
+        condition: service_started
+    ports:
+      - "${DASHBOARD_PORT:-3012}:3012"
+    environment:
+      PORT: 3012
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-n8n}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER:-n8n}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD:-n8npass}
+      DASHBOARD_WEBHOOK_URL: ${DASHBOARD_WEBHOOK_URL:-http://n8n:5678/webhook/content-topic-intake}
+      DASHBOARD_CONTROL_TOKEN: ${DASHBOARD_CONTROL_TOKEN:-}
+      DASHBOARD_RECENT_RUN_LIMIT: ${DASHBOARD_RECENT_RUN_LIMIT:-30}
 
 volumes:
   n8n_data:

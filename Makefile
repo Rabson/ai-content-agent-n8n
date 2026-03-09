@@ -6,14 +6,19 @@ COMPOSE_FILE := $(INFRA_DIR)/docker-compose.yml
 WORKFLOW_BUNDLE := workflows/bundle.workflows.json
 N8N_CONTAINER := ai-content-n8n-n8n-1
 POSTGRES_CONTAINER := ai-content-n8n-postgres-1
+DASHBOARD_CONTAINER := ai-content-n8n-dashboard-1
+MAIN_WORKFLOW_ID := Xlc6ZFLdozHji7p7
 N8N_IMAGE_COMPAT := n8nio/n8n:1.60.1
 PG_CREDENTIAL_ID ?= f3dc8f0f-1f70-47f5-bf25-10b0d2e55111
 PG_CREDENTIAL_NAME ?= Local Postgres (n8n)
 
-.PHONY: help n8n-pull n8n-pull-compat n8n-up n8n-up-compat n8n-up-recreate n8n-down n8n-ps n8n-logs n8n-restart n8n-import-bundle n8n-import-postgres-credential n8n-publish-workflows n8n-import-bundle-live n8n-status n8n-workflow-ids n8n-doctor bind-postgres-cred-files
+.PHONY: help generate-single-user-workflow n8n-pull n8n-pull-compat n8n-up n8n-up-compat n8n-up-recreate n8n-down n8n-ps n8n-logs n8n-restart n8n-import-bundle n8n-import-postgres-credential n8n-publish-workflows n8n-import-bundle-live n8n-status n8n-workflow-ids n8n-doctor bind-postgres-cred-files dashboard-health dashboard-logs
 
 help: ## Show available targets
 	@awk 'BEGIN {FS=":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf " - %s\n", $$1 " — " $$2}' Makefile
+
+generate-single-user-workflow: ## Generate single-user single-workflow bundle
+	node scripts/generate-single-user-workflow.mjs
 
 n8n-pull: ## Pull n8n/postgres images
 	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) pull
@@ -36,8 +41,8 @@ n8n-down: ## Stop stack
 n8n-ps: ## Show stack status
 	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) ps
 
-n8n-logs: ## Tail n8n and postgres logs
-	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) logs --no-color --tail=120 n8n postgres
+n8n-logs: ## Tail n8n, postgres, and dashboard logs
+	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) logs --no-color --tail=120 n8n postgres dashboard
 
 n8n-restart: ## Restart n8n service
 	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) restart n8n
@@ -48,11 +53,9 @@ n8n-import-bundle: ## Import bundle.workflows.json into running n8n
 n8n-import-postgres-credential: ## Import local Postgres credential into n8n
 	docker exec $(N8N_CONTAINER) n8n import:credentials --input=/workflows/postgres.credentials.json
 
-n8n-publish-workflows: ## Publish all WF_* workflows (needed for n8n 2.11 webhook registration)
-	@for id in $$(docker exec $(POSTGRES_CONTAINER) psql -U n8n -d n8n -At -c "SELECT id FROM workflow_entity WHERE name LIKE 'WF_%' ORDER BY name;"); do \
-		echo "Publishing $$id"; \
-		docker exec $(N8N_CONTAINER) n8n publish:workflow --id=$$id; \
-	done
+n8n-publish-workflows: ## Publish single orchestrator workflow (needed for n8n 2.11 webhook registration)
+	@echo "Publishing $(MAIN_WORKFLOW_ID)"
+	@docker exec $(N8N_CONTAINER) n8n publish:workflow --id=$(MAIN_WORKFLOW_ID)
 
 n8n-import-bundle-live: ## Import bundle, publish workflows, and restart n8n
 	$(MAKE) n8n-import-bundle
@@ -71,8 +74,17 @@ n8n-status: ## Quick health/status check
 	@echo ""
 	@echo "n8n root page check (inside container):"
 	@docker exec $(N8N_CONTAINER) sh -lc "wget -qO- http://127.0.0.1:5678/ | head -n 2"
+	@echo ""
+	@echo "dashboard health check (inside container):"
+	@docker exec $(DASHBOARD_CONTAINER) sh -lc "wget -qO- http://127.0.0.1:3012/health | head -n 2"
 
 n8n-doctor: ## Print Docker+n8n compatibility diagnostics
 	@echo "Docker Server Version: $$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo unavailable)"
 	@echo "Configured N8N_IMAGE: $$(grep '^N8N_IMAGE=' $(ENV_FILE) | cut -d'=' -f2-)"
 	@echo "If n8n:2.x pull fails with 'invalid tar header', update Docker Desktop or use 'make n8n-up-compat'."
+
+dashboard-health: ## Query dashboard health endpoint from inside dashboard container
+	docker exec $(DASHBOARD_CONTAINER) sh -lc "wget -qO- http://127.0.0.1:3012/health"
+
+dashboard-logs: ## Tail only dashboard logs
+	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) logs --no-color --tail=120 dashboard
