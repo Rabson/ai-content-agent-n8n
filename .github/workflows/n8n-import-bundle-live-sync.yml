@@ -1,0 +1,124 @@
+name: n8n Import Bundle Live Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      push_changes:
+        description: Push committed workflow JSON changes to the branch
+        required: false
+        type: boolean
+        default: true
+      commit_message:
+        description: Commit message override (optional)
+        required: false
+        type: string
+        default: ""
+  # schedule:
+  #   - cron: "15 2 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: n8n-import-bundle-live-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-workflows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      N8N_CONTAINER: ai-content-n8n-n8n-1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare .env
+        env:
+          N8N_ENCRYPTION_KEY: ${{ secrets.N8N_ENCRYPTION_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${N8N_ENCRYPTION_KEY}" ]; then
+            echo "Missing repository secret: N8N_ENCRYPTION_KEY" >&2
+            exit 1
+          fi
+
+          cp .env.example .env
+          {
+            echo "N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}"
+          } >> .env
+
+      - name: Start n8n stack
+        run: make n8n-up
+
+      - name: Wait for n8n
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            if docker exec "${N8N_CONTAINER}" sh -lc "wget -qO- http://127.0.0.1:5678/ >/dev/null"; then
+              echo "n8n is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "n8n did not become ready in time" >&2
+          exit 1
+
+      - name: Import credential (best effort)
+        run: |
+          set -euo pipefail
+          if ! make n8n-import-postgres-credential; then
+            echo "Credential import failed; continuing (it may already exist)."
+          fi
+
+      - name: Import bundle + publish + restart
+        run: make n8n-import-bundle-live
+
+      - name: Export workflows back to repo files
+        run: |
+          set -euo pipefail
+
+          docker exec "${N8N_CONTAINER}" n8n export:workflow --all --output=/tmp/workflows.export.json --pretty
+          docker cp "${N8N_CONTAINER}:/tmp/workflows.export.json" workflows/.workflows.export.json
+
+          jq 'sort_by(.name)' workflows/.workflows.export.json > workflows/bundle.workflows.json
+
+          for file in workflows/WF_*.json; do
+            name="$(basename "${file}" .json)"
+            payload="$(jq -c --arg name "${name}" 'map(select(.name == $name)) | .[0]' workflows/bundle.workflows.json)"
+            if [ "${payload}" = "null" ]; then
+              echo "Skipping ${name}: not found in export bundle"
+              continue
+            fi
+            jq --arg name "${name}" 'map(select(.name == $name)) | .[0]' workflows/bundle.workflows.json > "${file}"
+          done
+
+          rm -f workflows/.workflows.export.json
+
+      - name: Commit and push changes
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.push_changes }}
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet; then
+            echo "No workflow changes to commit."
+            exit 0
+          fi
+
+          COMMIT_MESSAGE="${{ github.event.inputs.commit_message }}"
+          if [ -z "${COMMIT_MESSAGE}" ]; then
+            COMMIT_MESSAGE="chore(n8n): sync bundle from scheduled import"
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add workflows/*.json
+          git commit -m "${COMMIT_MESSAGE}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Tear down stack
+        if: always()
+        run: make n8n-down
